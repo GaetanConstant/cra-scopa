@@ -11,11 +11,11 @@ import {
   Trash2, Save, AlertCircle, CheckCircle2, Loader2, User, LogOut, Lock, Key, Settings, Eye, Users
 } from 'lucide-react'
 
-const API_BASE = window.location.origin.includes(':3300')
+const API_BASE = window.location.host.includes(':3300')
   ? window.location.origin.replace(':3300', ':5500')
-  : (window.location.origin.includes(':3000')
+  : (window.location.host.includes(':3000')
     ? window.location.origin.replace(':3000', ':5500')
-    : 'http://localhost:5500');
+    : (window.location.port ? window.location.origin.replace(`:${window.location.port}`, ':5500') : `${window.location.origin}/api`));
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
