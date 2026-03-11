@@ -254,6 +254,15 @@ def create_cra_batch(entries: List[CRAEntry], session: Session = Depends(get_ses
     session.commit()
     return {"status": "ok"}
 
+@app.get("/cra/all/{year}/{month}", response_model=List[CRAEntry])
+def read_all_cra(year: int, month: int, session: Session = Depends(get_session)):
+    entries = session.exec(
+        select(CRAEntry).where(
+            CRAEntry.date >= date(year, month, 1)
+        )
+    ).all()
+    return [e for e in entries if e.date.month == month and e.date.year == year]
+
 @app.get("/cra/{user_id}/{year}/{month}", response_model=List[CRAEntry])
 def read_user_cra(user_id: int, year: int, month: int, session: Session = Depends(get_session)):
     entries = session.exec(
@@ -263,6 +272,8 @@ def read_user_cra(user_id: int, year: int, month: int, session: Session = Depend
         )
     ).all()
     return [e for e in entries if e.date.month == month and e.date.year == year]
+
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -8,7 +8,7 @@ import {
 import { fr } from 'date-fns/locale'
 import {
   ChevronLeft, ChevronRight, Briefcase, Calendar, Info, Plus,
-  Trash2, Save, AlertCircle, CheckCircle2, Loader2, User, LogOut, Lock, Key, Settings, Eye, Users
+  Trash2, Save, AlertCircle, CheckCircle2, Loader2, User, LogOut, Lock, Key, Settings, Eye, Users, Layout, BarChart3
 } from 'lucide-react'
 
 const API_BASE = window.location.host.includes(':3300')
@@ -60,6 +60,21 @@ function App() {
       fetchCRA();
     }
   }, [currentUser, currentDate]);
+
+  useEffect(() => {
+    if (currentUser?.is_admin && currentView === 'admin_cra' && selectedReviewUser) {
+      const refreshAdminSelection = async () => {
+        const uid = selectedReviewUser.id;
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        try {
+          const res = await axios.get(`${API_BASE}/cra/${uid}/${year}/${month}`);
+          setSelectedReviewUser(prev => ({ ...prev, entries: res.data }));
+        } catch (err) { console.error("Error refreshing admin review", err) }
+      };
+      refreshAdminSelection();
+    }
+  }, [currentDate, currentView]);
 
   const fetchProjects = async () => {
     try {
@@ -118,6 +133,24 @@ function App() {
     } catch (err) { console.error("Error CRA", err) }
     finally { setLoading(false); }
   };
+
+  const fetchAllCRAData = async () => {
+    if (!currentUser?.is_admin) return;
+    setLoading(true);
+    try {
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth() + 1;
+      const res = await axios.get(`${API_BASE}/cra/all/${year}/${month}`);
+      setAllCRAData(res.data);
+    } catch (err) { console.error("Error global CRA", err) }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => {
+    if (currentView === 'admin_global' && currentUser?.is_admin) {
+      fetchAllCRAData();
+    }
+  }, [currentView, currentDate]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -256,6 +289,7 @@ function App() {
               <>
                 <button onClick={() => setCurrentView('projects')} className={`transition-all ${currentView === 'projects' ? 'text-[#6186EA]' : 'opacity-30'}`}>Projets</button>
                 <button onClick={() => setCurrentView('admin_cra')} className={`transition-all ${currentView === 'admin_cra' ? 'text-[#6186EA]' : 'opacity-30'}`}>Revues CRA</button>
+                <button onClick={() => setCurrentView('admin_global')} className={`transition-all ${currentView === 'admin_global' ? 'text-[#6186EA]' : 'opacity-30'}`}>Bilan Global</button>
                 <button onClick={() => setCurrentView('admin_users')} className={`transition-all ${currentView === 'admin_users' ? 'text-[#6186EA]' : 'opacity-30'}`}>Collaborateurs</button>
               </>
             )}
@@ -439,7 +473,36 @@ function App() {
         <div className="bg-white rounded-[40px] p-10 border-2 border-black animate-in slide-in-from-bottom-5 duration-500 shadow-2xl">
           <div className="flex justify-between items-center mb-10">
             <h3 className="text-3xl font-black uppercase tracking-tighter">Fiche de {selectedReviewUser.full_name}</h3>
-            <span className="text-xs font-black uppercase bg-[#6186EA]/10 text-[#6186EA] px-4 py-2 rounded-full">{format(currentDate, 'MMMM yyyy', { locale: fr })}</span>
+            <div className="flex items-center bg-[#6186EA]/10 rounded-2xl p-1 border border-[#6186EA]/20 shadow-sm transition-all hover:bg-[#6186EA]/15">
+              <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-[#6186EA]/20 p-2 rounded-xl transition-all text-[#6186EA]"><ChevronLeft size={16} /></button>
+              <span className="px-6 font-black text-xs uppercase tracking-widest text-[#6186EA] min-w-[150px] text-center">{format(currentDate, 'MMMM yyyy', { locale: fr })}</span>
+              <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="hover:bg-[#6186EA]/20 p-2 rounded-xl transition-all text-[#6186EA]"><ChevronRight size={16} /></button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-6 mb-12">
+            {[
+              { label: 'Missions', type: 'Mission', color: 'bg-blue-500', icon: Briefcase },
+              { label: 'Formations', type: 'Formation', color: 'bg-amber-400', icon: Calendar },
+              { label: 'Interne', type: 'Interne', color: 'bg-indigo-500', icon: Layout },
+              { label: 'Absences', type: 'Absence', color: 'bg-red-500', icon: AlertCircle },
+            ].map(stat => {
+              const total = selectedReviewUser.entries
+                .filter(e => e.activity_type === stat.type)
+                .reduce((sum, e) => sum + e.duration_factor, 0);
+              return (
+                <div key={stat.type} className="bg-gray-50 rounded-3xl p-6 border-2 border-transparent hover:border-black/5 transition-all">
+                  <div className="flex items-center gap-4 mb-2">
+                    <div className={`${stat.color} p-2 rounded-xl text-white`}><stat.icon size={18} /></div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">{stat.label}</span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-black tracking-tighter">{total.toFixed(1)}</span>
+                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest text-right w-full">Jours</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           <div className="overflow-x-auto custom-scrollbar">
@@ -476,6 +539,93 @@ function App() {
           </div>
         </div>
       )}
+    </main>
+  );
+
+  const renderAdminGlobalView = () => (
+    <main className="p-8 max-w-7xl mx-auto">
+      <div className="flex items-center justify-between mb-10">
+        <div>
+          <h2 className="text-5xl font-black uppercase tracking-tighter mb-2">Bilan Global</h2>
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Activité consolidée de l'agence</p>
+        </div>
+        <div className="flex items-center bg-white rounded-3xl p-2 border-2 border-black/5 shadow-sm">
+          <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-gray-100 p-3 rounded-2xl transition-all text-black"><ChevronLeft size={20} /></button>
+          <span className="px-8 font-black text-sm uppercase tracking-[0.2em] min-w-[200px] text-center">{format(currentDate, 'MMMM yyyy', { locale: fr })}</span>
+          <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="hover:bg-gray-100 p-3 rounded-2xl transition-all text-black"><ChevronRight size={20} /></button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-[40px] shadow-2xl border-2 border-black overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-700">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="bg-black text-white">
+              <th className="p-8 text-left text-[10px] font-black uppercase tracking-widest">Collaborateur</th>
+              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-blue-500">Missions</th>
+              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-amber-400">Formations</th>
+              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-indigo-500">Interne</th>
+              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-red-500">Absences</th>
+              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-gray-900 border-l border-white/20">Total Actif</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y-2 divide-gray-50">
+            {allUsers.map(user => {
+              const userEntries = allCRAData.filter(e => e.user_id === user.id);
+              const getSum = (type) => userEntries.filter(e => e.activity_type === type).reduce((s, e) => s + e.duration_factor, 0);
+              
+              const mission = getSum('Mission');
+              const formation = getSum('Formation');
+              const interne = getSum('Interne');
+              const absence = getSum('Absence');
+              const total = mission + formation + interne;
+
+              return (
+                <tr key={user.id} className="hover:bg-gray-50/80 transition-all font-black group">
+                  <td className="p-8">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-400 group-hover:bg-black group-hover:text-white transition-all duration-300">
+                        {user.is_admin ? <Lock size={20} className="text-amber-500" /> : <User size={20} />}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="uppercase text-sm tracking-tight">{user.full_name}</p>
+                          {user.is_admin && <span className="bg-black text-white text-[7px] px-1.5 py-0.5 rounded-full">ADMIN</span>}
+                        </div>
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">@{user.username}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="p-8 text-center text-xl tracking-tighter text-blue-600">{mission.toFixed(1)}</td>
+                  <td className="p-8 text-center text-xl tracking-tighter text-amber-500">{formation.toFixed(1)}</td>
+                  <td className="p-8 text-center text-xl tracking-tighter text-indigo-600">{interne.toFixed(1)}</td>
+                  <td className="p-8 text-center text-xl tracking-tighter text-red-500">{absence.toFixed(1)}</td>
+                  <td className="p-8 text-center text-xl tracking-tighter bg-gray-50/50 border-l border-gray-100">{total.toFixed(1)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="bg-gray-50 font-black border-t-4 border-black">
+              <td className="p-8 uppercase text-[10px] tracking-widest">Total Agence</td>
+              <td className="p-8 text-center text-2xl tracking-tighter">
+                {allCRAData.filter(e => e.activity_type === 'Mission').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
+              </td>
+              <td className="p-8 text-center text-2xl tracking-tighter">
+                {allCRAData.filter(e => e.activity_type === 'Formation').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
+              </td>
+              <td className="p-8 text-center text-2xl tracking-tighter">
+                {allCRAData.filter(e => e.activity_type === 'Interne').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
+              </td>
+              <td className="p-8 text-center text-2xl tracking-tighter">
+                {allCRAData.filter(e => e.activity_type === 'Absence').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
+              </td>
+              <td className="p-8 text-center text-2xl bg-black text-white">
+                {allCRAData.filter(e => ['Mission', 'Formation', 'Interne'].includes(e.activity_type)).reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
     </main>
   );
 
@@ -618,7 +768,7 @@ function App() {
         }} className="space-y-6">
           <input type="text" value={projectNameInput} onChange={e => setProjectNameInput(e.target.value)} placeholder="NOM DU PROJET" className="w-full bg-gray-50 border-2 border-transparent focus:border-[#6186EA] p-5 rounded-3xl outline-none font-black text-sm uppercase" />
           <div className="flex gap-4">
-            {['Mission', 'Formation'].map(cat => <button key={cat} type="button" onClick={() => setProjectCategoryInput(cat)} className={`flex-1 py-4 rounded-2xl font-black uppercase text-xs border-2 transition-all ${projectCategoryInput === cat ? 'bg-black text-white border-black' : 'border-gray-200 text-gray-400'}`}>{cat}</button>)}
+            {['Mission', 'Formation', 'Interne'].map(cat => <button key={cat} type="button" onClick={() => setProjectCategoryInput(cat)} className={`flex-1 py-4 rounded-2xl font-black uppercase text-xs border-2 transition-all ${projectCategoryInput === cat ? 'bg-black text-white border-black' : 'border-gray-200 text-gray-400'}`}>{cat}</button>)}
           </div>
           <div className="flex gap-4">
             <button type="submit" className="flex-1 bg-[#6186EA] text-white p-6 rounded-3xl font-black uppercase text-sm">
@@ -648,7 +798,7 @@ function App() {
             className={`bg-white p-6 rounded-3xl border-2 flex items-center justify-between shadow-sm cursor-pointer transition-all ${editingProject?.id === p.id ? 'border-[#6186EA]' : 'border-black/5 hover:border-black/20'}`}
           >
             <div className="flex items-center gap-4">
-              <div className={`w-2 h-2 rounded-full ${p.category === 'Mission' ? 'bg-[#6186EA]' : 'bg-amber-400'}`}></div>
+              <div className={`w-2 h-2 rounded-full ${p.category === 'Mission' ? 'bg-[#6186EA]' : p.category === 'Interne' ? 'bg-indigo-500' : 'bg-amber-400'}`}></div>
               <span className="font-black uppercase text-sm">{p.name}</span>
             </div>
             <div className="flex items-center gap-4">
@@ -685,6 +835,7 @@ function App() {
       {currentUser && currentView === 'cra' && renderSpreadsheet()}
       {currentUser && currentView === 'projects' && renderProjectsView()}
       {currentUser && currentView === 'admin_cra' && renderAdminCRAView()}
+      {currentUser && currentView === 'admin_global' && renderAdminGlobalView()}
       {currentUser && currentView === 'admin_users' && renderAdminUsersView()}
       {currentUser && currentView === 'profile' && renderProfile()}
     </div>
