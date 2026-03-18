@@ -518,11 +518,12 @@ function App() {
               <tbody>
                 {/* Unique activities in this month's results for this user */}
                 {Array.from(new Set(selectedReviewUser.entries.map(e => e.project_id ? `P-${e.project_id}` : `A-${e.activity_type}`))).map(rowKey => {
-                  const project = selectedReviewUser.entries.find(e => (e.project_id ? `P-${e.project_id}` : `A-${e.activity_type}`) === rowKey)?.project;
-                  const activityType = selectedReviewUser.entries.find(e => (e.project_id ? `P-${e.project_id}` : `A-${e.activity_type}`) === rowKey)?.activity_type;
+                  const entry = selectedReviewUser.entries.find(e => (e.project_id ? `P-${e.project_id}` : `A-${e.activity_type}`) === rowKey);
+                  const projectName = entry?.project_id ? projects.find(p => p.id === entry.project_id)?.name : null;
+                  const activityType = entry?.activity_type;
                   return (
                     <tr key={rowKey} className="border-b border-black/5">
-                      <td className="p-4">{project?.name || activityType}</td>
+                      <td className="p-4">{projectName || activityType}</td>
                       {daysInMonth.map(day => {
                         const entry = selectedReviewUser.entries.find(e => isSameDay(parseISO(e.date), day) && (e.project_id ? `P-${e.project_id}` : `A-${e.activity_type}`) === rowKey);
                         return (
