@@ -415,7 +415,7 @@ function App() {
                               type="text" value={val || ""} placeholder="0"
                               onChange={(e) => {
                                 const v = e.target.value.replace(',', '.');
-                                if (v === "" || v === "0" || v === "1" || v === "0.5") updateCell(row.key, dateStr, v);
+                                if (v === "" || v === "0." || /^(0|1|0\.5?)$/.test(v)) updateCell(row.key, dateStr, v);
                               }}
                               className={`w-full h-12 text-center font-black rounded-xl outline-none transition-all ${val > 0 ? 'bg-[#6186EA] text-white' : 'bg-transparent hover:bg-gray-100'}`}
                             />
