@@ -239,14 +239,14 @@ def create_cra_batch(entries: List[CRAEntry], session: Session = Depends(get_ses
         existing = session.exec(
             select(CRAEntry).where(
                 CRAEntry.user_id == entry.user_id,
-                CRAEntry.date == entry.date
+                CRAEntry.date == entry.date,
+                CRAEntry.activity_type == entry.activity_type,
+                CRAEntry.project_id == entry.project_id
             )
         ).first()
 
         if existing:
             existing.duration_factor = entry.duration_factor
-            existing.activity_type = entry.activity_type
-            existing.project_id = entry.project_id
             session.add(existing)
         else:
             session.add(entry)

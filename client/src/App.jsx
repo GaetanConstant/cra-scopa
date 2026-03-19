@@ -439,13 +439,13 @@ function App() {
             </tbody>
             <tfoot>
               <tr className="bg-black/5 text-[10px] font-black uppercase">
-                <td className="p-6 text-right sticky left-0 z-10 bg-gray-200/50 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)]">Charge Totale (cible 1.0)</td>
+                <td className="p-6 text-right sticky left-0 z-10 bg-gray-200/50 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)]">Charge Totale</td>
                 {daysInMonth.map(day => {
                   const total = getDayTotal(format(day, 'yyyy-MM-dd'));
                   return (
                     <td key={format(day, 'yyyy-MM-dd')} className={`p-4 text-center ${getDay(day) === 0 || getDay(day) === 6 ? 'opacity-20' : ''}`}>
                       {getDay(day) !== 0 && getDay(day) !== 6 && (
-                        <div className={`px-2 py-1 rounded-lg ${total > 1 ? 'bg-red-500 text-white animate-bounce' : total === 1 ? 'text-[#6186EA]' : 'text-gray-400'}`}>{total.toFixed(1)}</div>
+                        <div className={`px-2 py-1 rounded-lg ${total > 1 ? 'bg-amber-400 text-white' : total === 1 ? 'text-[#6186EA]' : 'text-gray-400'}`}>{total.toFixed(1)}</div>
                       )}
                     </td>
                   );
