@@ -401,9 +401,11 @@ function App() {
                 let totalRow = 0;
                 return (
                   <tr key={row.key} className="hover:bg-gray-50/30 transition-all border-b border-black/5 group text-sm font-black uppercase">
-                    <td className="sticky left-0 z-10 bg-white p-6 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)] group-hover:bg-gray-50 flex items-center justify-between">
-                      <span>{row.project_id ? (projects.find(p => p.id === row.project_id)?.name || userProjects.find(p => p.id === row.project_id)?.name || 'Projet') : row.activity_type}</span>
-                      <button onClick={() => removeRow(row.key)} className="text-gray-100 group-hover:text-red-500"><Trash2 size={14} /></button>
+                    <td className="sticky left-0 z-10 bg-white p-6 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)] group-hover:bg-gray-50">
+                      <div className="flex items-center justify-between">
+                        <span>{row.project_id ? (projects.find(p => p.id === row.project_id)?.name || userProjects.find(p => p.id === row.project_id)?.name || 'Projet') : row.activity_type}</span>
+                        <button onClick={() => removeRow(row.key)} className="text-gray-100 group-hover:text-red-500"><Trash2 size={14} /></button>
+                      </div>
                     </td>
                     {daysInMonth.map(day => {
                       const dateStr = format(day, 'yyyy-MM-dd');
@@ -439,7 +441,7 @@ function App() {
             </tbody>
             <tfoot>
               <tr className="bg-black/5 text-[10px] font-black uppercase">
-                <td className="p-6 text-right sticky left-0 z-10 bg-gray-200/50 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)]">Charge Totale</td>
+                <td className="p-6 text-right sticky left-0 z-10 bg-gray-200 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)]">Charge Totale</td>
                 {daysInMonth.map(day => {
                   const total = getDayTotal(format(day, 'yyyy-MM-dd'));
                   return (

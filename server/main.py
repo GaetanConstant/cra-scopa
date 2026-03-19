@@ -236,21 +236,33 @@ def create_cra_batch(entries: List[CRAEntry], session: Session = Depends(get_ses
         if isinstance(entry.date, str):
             entry.date = datetime.strptime(entry.date, "%Y-%m-%d").date()
 
-        existing = session.exec(
-            select(CRAEntry).where(
-                CRAEntry.user_id == entry.user_id,
-                CRAEntry.date == entry.date,
-                CRAEntry.activity_type == entry.activity_type,
-                CRAEntry.project_id == entry.project_id
-            )
-        ).first()
+    if not entries:
+        return {"status": "ok"}
 
-        if existing:
-            existing.duration_factor = entry.duration_factor
-            session.add(existing)
-        else:
-            session.add(entry)
-    
+    user_id = entries[0].user_id
+    year = entries[0].date.year
+    month = entries[0].date.month
+
+    # Supprimer toutes les entrées existantes du mois pour cet utilisateur
+    existing_entries = session.exec(
+        select(CRAEntry).where(
+            CRAEntry.user_id == user_id,
+            CRAEntry.date >= date(year, month, 1),
+            CRAEntry.date < date(year + (month // 12), (month % 12) + 1, 1)
+        )
+    ).all()
+    for e in existing_entries:
+        session.delete(e)
+
+    for entry in entries:
+        session.add(CRAEntry(
+            date=entry.date,
+            duration_factor=entry.duration_factor,
+            activity_type=entry.activity_type,
+            user_id=entry.user_id,
+            project_id=entry.project_id
+        ))
+
     session.commit()
     return {"status": "ok"}
 
