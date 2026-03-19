@@ -35,6 +35,7 @@ function App() {
   // Spreadsheet grid states
   const [activeRows, setActiveRows] = useState([])
   const [gridData, setGridData] = useState({})
+  const [draftCell, setDraftCell] = useState({ key: null, date: null, value: "" })
 
   // Admin states
   const [selectedReviewUser, setSelectedReviewUser] = useState(null)
@@ -412,10 +413,18 @@ function App() {
                         <td key={dateStr} className={`p-2 border-r border-black/5 ${getDay(day) === 0 || getDay(day) === 6 ? 'bg-gray-50/50 opacity-30 grayscale' : ''}`}>
                           {getDay(day) !== 0 && getDay(day) !== 6 && (
                             <input
-                              type="text" value={val || ""} placeholder="0"
+                              type="text"
+                              value={draftCell.key === row.key && draftCell.date === dateStr ? draftCell.value : (val || "")}
+                              placeholder="0"
+                              onFocus={() => setDraftCell({ key: row.key, date: dateStr, value: val || "" })}
                               onChange={(e) => {
                                 const v = e.target.value.replace(',', '.');
-                                if (v === "" || v === "0." || /^(0|1|0\.5?)$/.test(v)) updateCell(row.key, dateStr, v);
+                                if (v === "" || /^\d*\.?\d*$/.test(v)) setDraftCell({ key: row.key, date: dateStr, value: v });
+                              }}
+                              onBlur={() => {
+                                const v = draftCell.key === row.key && draftCell.date === dateStr ? draftCell.value : "";
+                                updateCell(row.key, dateStr, v === "" ? "" : v);
+                                setDraftCell({ key: null, date: null, value: "" });
                               }}
                               className={`w-full h-12 text-center font-black rounded-xl outline-none transition-all ${val > 0 ? 'bg-[#6186EA] text-white' : 'bg-transparent hover:bg-gray-100'}`}
                             />
