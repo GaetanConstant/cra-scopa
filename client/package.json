@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "vite --host",
+    "dev": "vite --host --port 3300",
     "build": "vite build",
     "preview": "vite preview --host"
   },

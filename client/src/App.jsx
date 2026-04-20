@@ -371,6 +371,7 @@ function App() {
                 </select>
                 <button onClick={() => addRow('Absence')} className="bg-white border-2 border-black/5 rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-red-500 transition-all">+ Absence</button>
                 <button onClick={() => addRow('Formation')} className="bg-white border-2 border-black/5 rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-amber-500 transition-all">+ Formation</button>
+                <button onClick={() => addRow('Férié')} className="bg-white border-2 border-black/5 rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-green-500 transition-all">+ Férié</button>
               </div>
             </div>
           </div>
@@ -497,6 +498,7 @@ function App() {
               { label: 'Formations', type: 'Formation', color: 'bg-amber-400', icon: Calendar },
               { label: 'Interne', type: 'Interne', color: 'bg-indigo-500', icon: Layout },
               { label: 'Absences', type: 'Absence', color: 'bg-red-500', icon: AlertCircle },
+              { label: 'Fériés', type: 'Férié', color: 'bg-green-500', icon: Calendar },
             ].map(stat => {
               const total = selectedReviewUser.entries
                 .filter(e => e.activity_type === stat.type)
@@ -577,6 +579,7 @@ function App() {
               <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-amber-400">Formations</th>
               <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-indigo-500">Interne</th>
               <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-red-500">Absences</th>
+              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-green-500">Fériés</th>
               <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-gray-900 border-l border-white/20">Total Actif</th>
             </tr>
           </thead>
@@ -589,6 +592,7 @@ function App() {
               const formation = getSum('Formation');
               const interne = getSum('Interne');
               const absence = getSum('Absence');
+              const conge = getSum('Férié');
               const total = mission + formation + interne;
 
               return (
@@ -611,6 +615,7 @@ function App() {
                   <td className="p-8 text-center text-xl tracking-tighter text-amber-500">{formation.toFixed(1)}</td>
                   <td className="p-8 text-center text-xl tracking-tighter text-indigo-600">{interne.toFixed(1)}</td>
                   <td className="p-8 text-center text-xl tracking-tighter text-red-500">{absence.toFixed(1)}</td>
+                  <td className="p-8 text-center text-xl tracking-tighter text-green-600">{conge.toFixed(1)}</td>
                   <td className="p-8 text-center text-xl tracking-tighter bg-gray-50/50 border-l border-gray-100">{total.toFixed(1)}</td>
                 </tr>
               );
@@ -630,6 +635,9 @@ function App() {
               </td>
               <td className="p-8 text-center text-2xl tracking-tighter">
                 {allCRAData.filter(e => e.activity_type === 'Absence').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
+              </td>
+              <td className="p-8 text-center text-2xl tracking-tighter">
+                {allCRAData.filter(e => e.activity_type === 'Férié').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
               </td>
               <td className="p-8 text-center text-2xl bg-black text-white">
                 {allCRAData.filter(e => ['Mission', 'Formation', 'Interne'].includes(e.activity_type)).reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
