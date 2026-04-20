@@ -1,0 +1,19 @@
+services:
+  backend:
+    build: ./server
+    container_name: scopa-backend
+    ports:
+      - "5500:5500"
+    volumes:
+      # Persistance de la base de données SQLite
+      - ./server/database.db:/app/database.db
+    restart: always
+
+  frontend:
+    build: ./client
+    container_name: scopa-frontend
+    ports:
+      - "3300:3300"
+    depends_on:
+      - backend
+    restart: always
