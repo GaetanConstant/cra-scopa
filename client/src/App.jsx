@@ -795,13 +795,28 @@ function App() {
               {editingProject ? 'Enregistrer les modifications' : 'Créer le projet'}
             </button>
             {editingProject && (
-              <button
-                type="button"
-                onClick={() => { setEditingProject(null); setProjectNameInput(""); }}
-                className="bg-gray-100 text-black p-6 rounded-3xl font-black uppercase text-sm"
-              >
-                Annuler
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => { setEditingProject(null); setProjectNameInput(""); }}
+                  className="bg-gray-100 text-black p-6 rounded-3xl font-black uppercase text-sm"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!window.confirm(`Supprimer le projet "${editingProject.name}" ?`)) return;
+                    await axios.delete(`${API_BASE}/projects/${editingProject.id}`);
+                    setEditingProject(null);
+                    setProjectNameInput("");
+                    fetchProjects();
+                  }}
+                  className="bg-red-500 text-white p-6 rounded-3xl font-black uppercase text-sm hover:bg-red-600 transition-all"
+                >
+                  Supprimer
+                </button>
+              </>
             )}
           </div>
         </form>

@@ -230,6 +230,15 @@ def update_project(project_id: int, project_data: Project, session: Session = De
     session.refresh(db_project)
     return db_project
 
+@app.delete("/projects/{project_id}")
+def delete_project(project_id: int, session: Session = Depends(get_session)):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Projet non trouvé")
+    session.delete(project)
+    session.commit()
+    return {"status": "ok"}
+
 @app.post("/cra/batch")
 def create_cra_batch(entries: List[CRAEntry], session: Session = Depends(get_session)):
     for entry in entries:
