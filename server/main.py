@@ -1,26 +1,49 @@
+import logging
+import os
 from datetime import date, datetime
+from pathlib import Path
 from typing import List, Optional
 from sqlmodel import Field, Relationship, SQLModel, create_engine, Session, select
 from sqlalchemy.orm import selectinload
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-import bcrypt
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-def hash_password(password: str):
-    pwd_bytes = password.encode('utf-8')
-    salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(pwd_bytes, salt)
-    return hashed.decode('utf-8')
+from auth import (
+    bearer_scheme,
+    create_access_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
+)
 
-def verify_password(plain_password: str, hashed_password: str):
-    password_byte_enc = plain_password.encode('utf-8')
-    hashed_password_byte_enc = hashed_password.encode('utf-8')
-    return bcrypt.checkpw(password_byte_enc, hashed_password_byte_enc)
+logger = logging.getLogger(__name__)
+
+
+def load_dotenv(path: Path) -> None:
+    """Charge un .env minimal dans os.environ, sans dependance externe.
+
+    Les variables deja presentes dans l'environnement ne sont pas ecrasees :
+    en production, systemd ou Docker priment sur le fichier.
+    """
+    if not path.exists():
+        return
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+load_dotenv(Path(__file__).parent / ".env")
 
 # Database Setup
+# DATABASE_URL permet de pointer une base jetable (tests, verification) sans
+# toucher a database.db ; c'est la meme variable que lit alembic/env.py.
 sqlite_file_name = "database.db"
-sqlite_url = f"sqlite:///{sqlite_file_name}"
+sqlite_url = os.environ.get("DATABASE_URL", f"sqlite:///{sqlite_file_name}")
 connect_args = {"check_same_thread": False}
 engine = create_engine(sqlite_url, connect_args=connect_args)
 
@@ -30,6 +53,40 @@ def create_db_and_tables():
 def get_session():
     with Session(engine) as session:
         yield session
+
+
+CREDENTIALS_ERROR = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Authentification requise",
+    headers={"WWW-Authenticate": "Bearer"},
+)
+
+
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    session: Session = Depends(get_session),
+) -> "User":
+    """Utilisateur porte par le jeton Bearer, ou 401."""
+    if credentials is None:
+        raise CREDENTIALS_ERROR
+    payload = decode_access_token(credentials.credentials)
+    if payload is None:
+        raise CREDENTIALS_ERROR
+    user = session.get(User, int(payload["sub"]))
+    if user is None:
+        # Compte supprime depuis l'emission du jeton.
+        raise CREDENTIALS_ERROR
+    return user
+
+
+def require_admin(current_user: "User" = Depends(get_current_user)) -> "User":
+    """Restreint la route aux administrateurs."""
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Action reservee aux administrateurs",
+        )
+    return current_user
 
 # Link Table for Many-to-Many
 class UserProjectLink(SQLModel, table=True):
@@ -107,11 +164,13 @@ def on_startup():
 @app.post("/auth/login")
 def login(req: LoginRequest, session: Session = Depends(get_session)):
     user = session.exec(select(User).where(User.username == req.username)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Utilisateur non trouvé")
-    if not verify_password(req.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Mot de passe incorrect")
+    # Message unique : distinguer "compte inconnu" de "mot de passe faux"
+    # revient a confirmer l'existence d'un compte a qui le demande.
+    if not user or not verify_password(req.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Identifiants incorrects")
     return {
+        "access_token": create_access_token(user.id, user.is_admin),
+        "token_type": "bearer",
         "id": user.id,
         "full_name": user.full_name,
         "username": user.username,
@@ -119,8 +178,13 @@ def login(req: LoginRequest, session: Session = Depends(get_session)):
     }
 
 @app.post("/users/password")
-def change_password(req: PasswordChangeRequest, session: Session = Depends(get_session)):
-    user = session.get(User, req.user_id)
+def change_password(
+    req: PasswordChangeRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    # Le corps de la requete ne decide pas de la cible : seul le jeton le fait.
+    user = session.get(User, current_user.id)
     if not user or not verify_password(req.old_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Ancien mot de passe incorrect")
     
@@ -130,7 +194,11 @@ def change_password(req: PasswordChangeRequest, session: Session = Depends(get_s
     return {"status": "ok"}
 
 @app.post("/users/")
-def create_user(req: UserCreateUpdate, session: Session = Depends(get_session)):
+def create_user(
+    req: UserCreateUpdate,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+):
     existing = session.exec(select(User).where(User.username == req.username)).first()
     if existing: raise HTTPException(status_code=400, detail="Ce nom d'utilisateur existe déjà")
     
@@ -148,7 +216,12 @@ def create_user(req: UserCreateUpdate, session: Session = Depends(get_session)):
     return user
 
 @app.put("/users/{user_id}")
-def update_user(user_id: int, req: UserCreateUpdate, session: Session = Depends(get_session)):
+def update_user(
+    user_id: int,
+    req: UserCreateUpdate,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+):
     user = session.get(User, user_id)
     if not user: raise HTTPException(status_code=404)
     
@@ -166,7 +239,10 @@ def update_user(user_id: int, req: UserCreateUpdate, session: Session = Depends(
     return user
 
 @app.get("/users/")
-def read_users(session: Session = Depends(get_session)):
+def read_users(
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
     statement = select(User).options(selectinload(User.projects))
     users = session.exec(statement).all()
     # Explicitly convert to dict to include relationships
@@ -180,7 +256,11 @@ def read_users(session: Session = Depends(get_session)):
 
 # Get projects for a specific user
 @app.get("/users/{user_id}/projects")
-def get_user_projects(user_id: int, session: Session = Depends(get_session)):
+def get_user_projects(
+    user_id: int,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
     statement = select(User).where(User.id == user_id).options(selectinload(User.projects))
     user = session.exec(statement).first()
     if not user: raise HTTPException(status_code=404)
@@ -188,7 +268,12 @@ def get_user_projects(user_id: int, session: Session = Depends(get_session)):
 
 # Update projects for a user (Admin only logic on frontend)
 @app.post("/users/{user_id}/projects")
-def update_user_projects(user_id: int, req: UserProjectsUpdate, session: Session = Depends(get_session)):
+def update_user_projects(
+    user_id: int,
+    req: UserProjectsUpdate,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+):
     statement = select(User).where(User.id == user_id).options(selectinload(User.projects))
     user = session.exec(statement).first()
     if not user: raise HTTPException(status_code=404)
@@ -204,11 +289,18 @@ def update_user_projects(user_id: int, req: UserProjectsUpdate, session: Session
     return {"status": "ok"}
 
 @app.get("/projects/", response_model=List[Project])
-def read_projects(session: Session = Depends(get_session)):
+def read_projects(
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
     return session.exec(select(Project)).all()
 
 @app.post("/projects/", response_model=Project)
-def create_project(project: Project, session: Session = Depends(get_session)):
+def create_project(
+    project: Project,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+):
     existing = session.exec(select(Project).where(Project.name == project.name)).first()
     if existing: return existing
     session.add(project)
@@ -217,7 +309,12 @@ def create_project(project: Project, session: Session = Depends(get_session)):
     return project
 
 @app.put("/projects/{project_id}", response_model=Project)
-def update_project(project_id: int, project_data: Project, session: Session = Depends(get_session)):
+def update_project(
+    project_id: int,
+    project_data: Project,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+):
     db_project = session.get(Project, project_id)
     if not db_project:
         raise HTTPException(status_code=404, detail="Projet non trouvé")
@@ -231,7 +328,11 @@ def update_project(project_id: int, project_data: Project, session: Session = De
     return db_project
 
 @app.delete("/projects/{project_id}")
-def delete_project(project_id: int, session: Session = Depends(get_session)):
+def delete_project(
+    project_id: int,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+):
     project = session.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Projet non trouvé")
@@ -240,7 +341,17 @@ def delete_project(project_id: int, session: Session = Depends(get_session)):
     return {"status": "ok"}
 
 @app.post("/cra/batch")
-def create_cra_batch(entries: List[CRAEntry], session: Session = Depends(get_session)):
+def create_cra_batch(
+    entries: List[CRAEntry],
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    # Un consultant ne saisit que pour lui-meme ; l'admin peut saisir pour tous.
+    if not current_user.is_admin and any(e.user_id != current_user.id for e in entries):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Saisie possible uniquement sur son propre CRA",
+        )
     for entry in entries:
         if isinstance(entry.date, str):
             entry.date = datetime.strptime(entry.date, "%Y-%m-%d").date()
@@ -276,7 +387,12 @@ def create_cra_batch(entries: List[CRAEntry], session: Session = Depends(get_ses
     return {"status": "ok"}
 
 @app.get("/cra/all/{year}/{month}", response_model=List[CRAEntry])
-def read_all_cra(year: int, month: int, session: Session = Depends(get_session)):
+def read_all_cra(
+    year: int,
+    month: int,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
     entries = session.exec(
         select(CRAEntry).where(
             CRAEntry.date >= date(year, month, 1)
@@ -285,7 +401,13 @@ def read_all_cra(year: int, month: int, session: Session = Depends(get_session))
     return [e for e in entries if e.date.month == month and e.date.year == year]
 
 @app.get("/cra/{user_id}/{year}/{month}", response_model=List[CRAEntry])
-def read_user_cra(user_id: int, year: int, month: int, session: Session = Depends(get_session)):
+def read_user_cra(
+    user_id: int,
+    year: int,
+    month: int,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
     entries = session.exec(
         select(CRAEntry).where(
             CRAEntry.user_id == user_id,

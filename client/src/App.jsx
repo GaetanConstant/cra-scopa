@@ -17,10 +17,34 @@ const API_BASE = window.location.host.includes(':3300')
     ? window.location.origin.replace(':3000', ':5500')
     : (window.location.port ? window.location.origin.replace(`:${window.location.port}`, ':5500') : `${window.location.origin}/api`));
 
+// Toute requete porte le jeton delivre au login.
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('scopa_token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
+// Jeton absent, invalide ou expire : on vide la session et on repart du login,
+// plutot que de laisser l'ecran se remplir d'erreurs silencieuses.
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const isLoginCall = error.config?.url?.endsWith('/auth/login')
+    if (error.response?.status === 401 && !isLoginCall) {
+      localStorage.removeItem('scopa_token')
+      localStorage.removeItem('scopa_user')
+      window.location.reload()
+    }
+    return Promise.reject(error)
+  }
+)
+
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem('scopa_user')
-    return saved ? JSON.parse(saved) : null
+    const token = localStorage.getItem('scopa_token')
+    // Une session sans jeton ne sert a rien : toutes les routes la refuseraient.
+    return saved && token ? JSON.parse(saved) : null
   })
 
   const [currentDate, setCurrentDate] = useState(new Date())
@@ -159,6 +183,7 @@ function App() {
     setErrorMsg("");
     try {
       const res = await axios.post(`${API_BASE}/auth/login`, loginForm);
+      localStorage.setItem('scopa_token', res.data.access_token);
       localStorage.setItem('scopa_user', JSON.stringify(res.data));
       setCurrentUser(res.data);
       setCurrentView('cra');
@@ -168,6 +193,7 @@ function App() {
   };
 
   const handleLogout = () => {
+    localStorage.removeItem('scopa_token');
     localStorage.removeItem('scopa_user');
     setCurrentUser(null);
     setCurrentView('login');
