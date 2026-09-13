@@ -264,3 +264,117 @@ def test_consultant_agit_sur_ses_propres_tickets(
         ).status_code
         == 200
     )
+
+
+# --- Tickets : projet et suppression ---------------------------------------
+
+
+def _affecter(
+    client: TestClient, entetes_admin: dict[str, str], user_id: int, project_id: int
+) -> None:
+    client.post(
+        f"/users/{user_id}/projects",
+        json={"project_ids": [project_id]},
+        headers=entetes_admin,
+    )
+
+
+def _creer_projet(client: TestClient, entetes_admin: dict[str, str], nom: str) -> int:
+    return client.post(
+        "/projects/", json={"name": nom, "category": "Mission"}, headers=entetes_admin
+    ).json()["id"]
+
+
+def test_consultant_ne_cree_pas_de_ticket_sur_un_projet_non_affecte(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+) -> None:
+    autre = _creer_projet(client, entetes_admin, "PROJET DES AUTRES")
+    reponse = client.post(
+        "/tickets",
+        json={"title": "Intrusion", "project_id": autre},
+        headers=entetes_consultant,
+    )
+    assert reponse.status_code == 403
+    assert "pas affecte" in reponse.json()["detail"]
+
+
+def test_consultant_cree_un_ticket_sur_sa_mission(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    consultant_id: int,
+) -> None:
+    sien = _creer_projet(client, entetes_admin, "SA MISSION")
+    _affecter(client, entetes_admin, consultant_id, sien)
+    reponse = client.post(
+        "/tickets", json={"title": "Chez moi", "project_id": sien}, headers=entetes_consultant
+    )
+    assert reponse.status_code == 200
+    assert reponse.json()["project_id"] == sien
+
+
+def test_consultant_ne_deplace_pas_un_ticket_vers_un_projet_non_affecte(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+) -> None:
+    autre = _creer_projet(client, entetes_admin, "PROJET DES AUTRES")
+    ticket = _ticket(client, entetes_consultant)
+    reponse = client.patch(
+        f"/tickets/{ticket['id']}", json={"project_id": autre}, headers=entetes_consultant
+    )
+    assert reponse.status_code == 403
+
+
+def test_admin_rattache_a_n_importe_quel_projet(
+    client: TestClient, entetes_admin: dict[str, str]
+) -> None:
+    projet = _creer_projet(client, entetes_admin, "N'IMPORTE LEQUEL")
+    reponse = client.post(
+        "/tickets", json={"title": "X", "project_id": projet}, headers=entetes_admin
+    )
+    assert reponse.status_code == 200
+
+
+def test_auteur_supprime_son_ticket(
+    client: TestClient, entetes_consultant: dict[str, str]
+) -> None:
+    sien = _ticket(client, entetes_consultant)
+    assert client.delete(f"/tickets/{sien['id']}", headers=entetes_consultant).status_code == 200
+
+
+def test_assigne_ne_supprime_pas_le_ticket_d_un_autre(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    consultant_id: int,
+) -> None:
+    """Un ticket qu'on vous confie n'est pas à vous."""
+    confie = _ticket(client, entetes_admin, assignee_id=consultant_id)
+    reponse = client.delete(f"/tickets/{confie['id']}", headers=entetes_consultant)
+    assert reponse.status_code == 403
+
+
+def test_admin_supprime_n_importe_quel_ticket(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+) -> None:
+    autrui = _ticket(client, entetes_consultant)
+    assert client.delete(f"/tickets/{autrui['id']}", headers=entetes_admin).status_code == 200
+
+
+def test_le_detail_dit_si_on_peut_supprimer(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    consultant_id: int,
+) -> None:
+    confie = _ticket(client, entetes_admin, assignee_id=consultant_id)
+    vu_par_l_assigne = client.get(f"/tickets/{confie['id']}", headers=entetes_consultant).json()
+    assert vu_par_l_assigne["can_delete"] is False
+
+    vu_par_l_admin = client.get(f"/tickets/{confie['id']}", headers=entetes_admin).json()
+    assert vu_par_l_admin["can_delete"] is True

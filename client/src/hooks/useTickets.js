@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   getBoard,
   getProjects,
+  getUserProjects,
   getTags,
   getUsers,
   messageErreur,
@@ -41,7 +42,7 @@ export const REGROUPEMENTS = [
 
 const BOARD_VIDE = { todo: [], in_progress: [], to_validate: [], done: [] }
 
-export function useTickets() {
+export function useTickets(currentUser) {
   const [board, setBoard] = useState(BOARD_VIDE)
   const [tags, setTags] = useState([])
   const [utilisateurs, setUtilisateurs] = useState([])
@@ -75,7 +76,9 @@ export function useTickets() {
         getBoard(params),
         getTags(),
         getUsers(),
-        getProjects(),
+        // Un consultant ne peut rattacher un ticket qu'a ses missions :
+        // lui proposer les autres ne ferait que produire des 403.
+        currentUser?.is_admin ? getProjects() : getUserProjects(currentUser.id),
       ])
       setBoard({ ...BOARD_VIDE, ...colonnes })
       setTags(etiquettes)
@@ -86,7 +89,7 @@ export function useTickets() {
     } finally {
       setLoading(false)
     }
-  }, [params])
+  }, [params, currentUser?.id, currentUser?.is_admin])
 
   useEffect(() => {
     charger()

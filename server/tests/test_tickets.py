@@ -383,13 +383,16 @@ def test_etiquette_inconnue_refusee(
 # --- Suppression -----------------------------------------------------------
 
 
-def test_consultant_ne_supprime_pas_un_ticket(
-    client: TestClient, entetes_consultant: dict[str, str]
+def test_consultant_ne_supprime_pas_le_ticket_d_un_autre(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    consultant_id: int,
 ) -> None:
-    """§12 — un consultant reçoit un 403 sur la suppression."""
-    ticket = _ticket(client, entetes_consultant)
-    reponse = client.delete(f"/tickets/{ticket['id']}", headers=entetes_consultant)
-    assert reponse.status_code == 403
+    """Le §12 réservait la suppression à l'admin ; décision SCOPA : l'auteur
+    peut supprimer le sien, mais pas celui qu'on lui a confié."""
+    confie = _ticket(client, entetes_admin, assignee_id=consultant_id)
+    assert client.delete(f"/tickets/{confie['id']}", headers=entetes_consultant).status_code == 403
 
 
 def test_admin_supprime_et_nettoie(
@@ -463,19 +466,36 @@ def test_done_sans_date_de_cloture_reste_visible(
 # --- Rattachement à un projet ----------------------------------------------
 
 
-def _projet_pour_tickets(client: TestClient, entetes_admin: dict[str, str], nom: str) -> int:
+def _projet_pour_tickets(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    nom: str,
+    affecter_a: int | None = None,
+) -> int:
+    """Cree un projet, et y affecte un consultant si demande.
+
+    Un non-administrateur ne peut rattacher un ticket qu'a une mission ou il
+    est affecte : sans l'affectation, la creation est refusee.
+    """
     reponse = client.post(
         "/projects/", json={"name": nom, "category": "Mission"}, headers=entetes_admin
     )
     assert reponse.status_code == 200, reponse.text
-    return reponse.json()["id"]
+    projet_id = reponse.json()["id"]
+    if affecter_a is not None:
+        client.post(
+            f"/users/{affecter_a}/projects",
+            json={"project_ids": [projet_id]},
+            headers=entetes_admin,
+        )
+    return projet_id
 
 
 def test_ticket_porte_un_projet(
     client: TestClient, entetes_admin: dict[str, str], entetes_consultant: dict[str, str]
 ) -> None:
     projet_id = _projet_pour_tickets(client, entetes_admin, "HOMESERVE")
-    ticket = _ticket(client, entetes_consultant, project_id=projet_id)
+    ticket = _ticket(client, entetes_admin, project_id=projet_id)
     assert ticket["project_id"] == projet_id
 
 
@@ -484,15 +504,15 @@ def test_projet_modifiable_et_detachable(
 ) -> None:
     a = _projet_pour_tickets(client, entetes_admin, "A")
     b = _projet_pour_tickets(client, entetes_admin, "B")
-    ticket = _ticket(client, entetes_consultant, project_id=a)
+    ticket = _ticket(client, entetes_admin, project_id=a)
 
     rattache = client.patch(
-        f"/tickets/{ticket['id']}", json={"project_id": b}, headers=entetes_consultant
+        f"/tickets/{ticket['id']}", json={"project_id": b}, headers=entetes_admin
     ).json()
     assert rattache["project_id"] == b
 
     detache = client.patch(
-        f"/tickets/{ticket['id']}", json={"project_id": None}, headers=entetes_consultant
+        f"/tickets/{ticket['id']}", json={"project_id": None}, headers=entetes_admin
     ).json()
     assert detache["project_id"] is None
 
@@ -502,11 +522,11 @@ def test_filtre_par_projet(
 ) -> None:
     a = _projet_pour_tickets(client, entetes_admin, "A")
     b = _projet_pour_tickets(client, entetes_admin, "B")
-    _ticket(client, entetes_consultant, title="Sur A", project_id=a)
-    _ticket(client, entetes_consultant, title="Sur B", project_id=b)
-    _ticket(client, entetes_consultant, title="Sans projet")
+    _ticket(client, entetes_admin, title="Sur A", project_id=a)
+    _ticket(client, entetes_admin, title="Sur B", project_id=b)
+    _ticket(client, entetes_admin, title="Sans projet")
 
-    board = client.get(f"/tickets/board?project_id={a}", headers=entetes_consultant).json()
+    board = client.get(f"/tickets/board?project_id={a}", headers=entetes_admin).json()
     assert [t["title"] for t in board["todo"]] == ["Sur A"]
 
 
@@ -519,10 +539,10 @@ def test_filtre_projet_se_combine_avec_mine(
 ) -> None:
     projet_id = _projet_pour_tickets(client, entetes_admin, "A")
     attendu = _ticket(
-        client, entetes_consultant, title="À moi", project_id=projet_id, assignee_id=consultant_id
+        client, entetes_admin, title="À moi", project_id=projet_id, assignee_id=consultant_id
     )
     _ticket(
-        client, entetes_consultant, title="À l'autre", project_id=projet_id, assignee_id=admin_id
+        client, entetes_admin, title="À l'autre", project_id=projet_id, assignee_id=admin_id
     )
 
     board = client.get(

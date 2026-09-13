@@ -1558,6 +1558,35 @@ def poser_etiquettes(session: Session, ticket_id: int, tag_ids: List[int]) -> bo
     return True
 
 
+def verifier_projet_du_ticket(
+    session: Session, project_id: Optional[int], current_user: "User"
+) -> None:
+    """Un consultant ne rattache un ticket qu'a une mission ou il est affecte.
+
+    Sans ce controle, n'importe qui ouvrirait des tickets sur les missions
+    des autres, et le tableau regroupe par projet deviendrait un fourre-tout.
+    """
+    if project_id is None or current_user.is_admin:
+        return
+    projet = session.get(Project, project_id)
+    if projet is None:
+        raise HTTPException(status_code=404, detail="Projet inconnu")
+    if session.get(UserProjectLink, (current_user.id, project_id)) is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Vous n'etes pas affecte au projet {projet.name}",
+        )
+
+
+def ticket_supprimable(ticket: TkTicket, current_user: "User") -> bool:
+    """Qui peut supprimer un ticket : son auteur, et l'administration.
+
+    L'assigne ne le peut pas : un ticket qu'on vous confie n'est pas a vous,
+    le refuser se fait en le renvoyant, pas en l'effacant.
+    """
+    return current_user.is_admin or ticket.reporter_id == current_user.id
+
+
 def ticket_visible(ticket: TkTicket, current_user: "User") -> bool:
     """Un consultant ne voit que ce qui le concerne.
 
@@ -1733,6 +1762,7 @@ def read_ticket(
 
     return {
         **ticket_en_dict(session, ticket),
+        "can_delete": ticket_supprimable(ticket, current_user),
         "comments": [c.model_dump() for c in commentaires],
         "events": [e.model_dump() for e in evenements],
     }
@@ -1746,6 +1776,7 @@ def create_ticket(
 ):
     verifier_valeur(req.status, TICKET_STATUSES, "Statut")
     verifier_valeur(req.priority, TICKET_PRIORITIES, "Priorite")
+    verifier_projet_du_ticket(session, req.project_id, current_user)
 
     ticket = TkTicket(
         title=req.title,
@@ -1782,6 +1813,8 @@ def update_ticket(
     tag_ids = champs.pop("tag_ids", None)
     if "priority" in champs and champs["priority"] is not None:
         verifier_valeur(champs["priority"], TICKET_PRIORITIES, "Priorite")
+    if "project_id" in champs:
+        verifier_projet_du_ticket(session, champs["project_id"], current_user)
 
     if champs.get("assignee_id", ticket.assignee_id) != ticket.assignee_id:
         journaliser(
@@ -1902,11 +1935,14 @@ def move_ticket(
 def delete_ticket(
     ticket_id: int,
     session: Session = Depends(get_session),
-    _admin: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
 ):
-    ticket = session.get(TkTicket, ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket introuvable")
+    ticket = ticket_accessible(session, ticket_id, current_user)
+    if not ticket_supprimable(ticket, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seuls l'auteur du ticket et un administrateur peuvent le supprimer",
+        )
 
     for modele, colonne in (
         (TkTicketTag, TkTicketTag.ticket_id),

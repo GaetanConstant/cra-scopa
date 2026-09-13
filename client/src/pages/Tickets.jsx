@@ -402,7 +402,7 @@ function Tiroir({ ticketId, utilisateurs, tags, projets, currentUser, onFermer, 
             </ul>
           </details>
 
-          {currentUser.is_admin && (
+          {detail.can_delete && (
             <button
               onClick={supprimer}
               className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-ink-muted hover:text-danger self-start"
@@ -434,7 +434,7 @@ export function Tickets({ currentUser }) {
     deplacerStatut,
     deplacerEtiquette,
     deplacerProjet,
-  } = useTickets()
+  } = useTickets(currentUser)
 
   const [ouvert, setOuvert] = useState(null)
   const [nouveauTitre, setNouveauTitre] = useState('')
