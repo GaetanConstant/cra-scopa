@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlmodel import Session, SQLModel, delete  # noqa: E402
 
 import main  # noqa: E402
-from main import CRAEntry, Project, User, UserProjectLink, app, engine  # noqa: E402
+from main import Client, CRAEntry, Project, User, UserProjectLink, app, engine  # noqa: E402
 from auth import hash_password  # noqa: E402
 
 MOT_DE_PASSE = "secret-de-test"
@@ -31,7 +31,7 @@ def base_vierge() -> Iterator[None]:
     """Chaque test part d'un schéma vide, pour ne pas dépendre de l'ordre."""
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
-        for model in (CRAEntry, UserProjectLink, Project, User):
+        for model in (CRAEntry, UserProjectLink, Project, Client, User):
             session.exec(delete(model))
         session.commit()
     yield

@@ -11,10 +11,14 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
 # Copier le code source et la base de données
-COPY main.py seed.py database.db ./
+COPY main.py auth.py seed.py database.db ./
+COPY alembic.ini ./
+COPY alembic ./alembic
 
 # Exposer le port de FastAPI unifié (5500)
 EXPOSE 5500
 
 # Lancer l'application uvicorn sur le port 5500
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5500"]
+# Le schema est applique avant le demarrage : un deploiement qui ajoute une
+# migration met la base a jour tout seul.
+CMD ["sh", "-c", "uv run alembic upgrade head && uv run uvicorn main:app --host 0.0.0.0 --port 5500"]
