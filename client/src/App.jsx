@@ -56,6 +56,9 @@ function App() {
   const [showPassword, setShowPassword] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('scopa_theme') || 'light')
   const [prefs, setPrefs] = useState(null)
+  // Sous 768 px, le tableau mensuel de 1500 px n'est pas manipulable : on
+  // affiche une semaine à la fois, avec de gros boutons de demi-journée.
+  const [semaineMobile, setSemaineMobile] = useState(0)
   const [mailConfig, setMailConfig] = useState(null)
   const [mailStatus, setMailStatus] = useState(null)
   const [passForm, setPassForm] = useState({ old: '', new: '', confirm: '' })
@@ -368,10 +371,10 @@ function App() {
   }, [daysInMonth, gridData]);
 
   const renderHeader = () => (
-    <header className="bg-card border-b-2 border-line p-6 flex items-center justify-between sticky top-0 z-50">
-      <div className="flex items-center gap-3">
-        <div className="bg-primary w-12 h-12 rounded-lg flex items-center justify-center -rotate-2">
-          <span className="text-on-primary font-black text-2xl">S</span>
+    <header className="bg-card border-b-2 border-line p-4 md:p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4 sticky top-0 z-50">
+      <div className="flex items-center gap-3 shrink-0">
+        <div className="bg-primary w-10 h-10 md:w-12 md:h-12 rounded-lg flex items-center justify-center -rotate-2 shrink-0">
+          <span className="text-on-primary font-black text-xl md:text-2xl">S</span>
         </div>
         <div className="cursor-pointer" onClick={() => currentUser && setCurrentView('cra')}>
           <h1 className="text-2xl font-black leading-tight tracking-tighter">SCOPA</h1>
@@ -380,22 +383,22 @@ function App() {
       </div>
 
       {currentUser && (
-        <div className="flex items-center gap-8">
-          <nav className="flex items-center gap-6 font-black text-xs tracking-widest uppercase">
-            <button onClick={() => setCurrentView('cra')} className={`transition-all ${currentView === 'cra' ? 'text-primary' : 'opacity-30'}`}>Mon CRA</button>
-            <button onClick={() => setCurrentView('conges')} className={`transition-all ${currentView === 'conges' ? 'text-primary' : 'opacity-30'}`}>Congés</button>
-            <button onClick={() => setCurrentView('tickets')} className={`transition-all ${currentView === 'tickets' ? 'text-primary' : 'opacity-30'}`}>Tickets</button>
-            <button onClick={() => setCurrentView('activite')} className={`transition-all ${currentView === 'activite' ? 'text-primary' : 'opacity-30'}`}>Activité</button>
+        <div className="flex flex-col-reverse md:flex-row md:items-center gap-3 md:gap-8 min-w-0">
+          <nav className="flex items-center gap-4 md:gap-6 font-black text-xs tracking-widest uppercase overflow-x-auto custom-scrollbar min-w-0">
+            <button onClick={() => setCurrentView('cra')} className={`transition-all whitespace-nowrap ${currentView === 'cra' ? 'text-primary' : 'opacity-30'}`}>Mon CRA</button>
+            <button onClick={() => setCurrentView('conges')} className={`transition-all whitespace-nowrap ${currentView === 'conges' ? 'text-primary' : 'opacity-30'}`}>Congés</button>
+            <button onClick={() => setCurrentView('tickets')} className={`transition-all whitespace-nowrap ${currentView === 'tickets' ? 'text-primary' : 'opacity-30'}`}>Tickets</button>
+            <button onClick={() => setCurrentView('activite')} className={`transition-all whitespace-nowrap ${currentView === 'activite' ? 'text-primary' : 'opacity-30'}`}>Activité</button>
             {currentUser.is_admin && (
               <>
-                <button onClick={() => setCurrentView('projects')} className={`transition-all ${currentView === 'projects' ? 'text-primary' : 'opacity-30'}`}>Projets</button>
-                <button onClick={() => setCurrentView('admin_cra')} className={`transition-all ${currentView === 'admin_cra' ? 'text-primary' : 'opacity-30'}`}>Revues CRA</button>
-                <button onClick={() => setCurrentView('admin_global')} className={`transition-all ${currentView === 'admin_global' ? 'text-primary' : 'opacity-30'}`}>Bilan Global</button>
-                <button onClick={() => setCurrentView('admin_users')} className={`transition-all ${currentView === 'admin_users' ? 'text-primary' : 'opacity-30'}`}>Collaborateurs</button>
+                <button onClick={() => setCurrentView('projects')} className={`transition-all whitespace-nowrap ${currentView === 'projects' ? 'text-primary' : 'opacity-30'}`}>Projets</button>
+                <button onClick={() => setCurrentView('admin_cra')} className={`transition-all whitespace-nowrap ${currentView === 'admin_cra' ? 'text-primary' : 'opacity-30'}`}>Revues CRA</button>
+                <button onClick={() => setCurrentView('admin_global')} className={`transition-all whitespace-nowrap ${currentView === 'admin_global' ? 'text-primary' : 'opacity-30'}`}>Bilan Global</button>
+                <button onClick={() => setCurrentView('admin_users')} className={`transition-all whitespace-nowrap ${currentView === 'admin_users' ? 'text-primary' : 'opacity-30'}`}>Collaborateurs</button>
               </>
             )}
           </nav>
-          <div className="border-l pl-6 flex items-center gap-4">
+          <div className="md:border-l md:pl-6 flex items-center gap-3 shrink-0 self-end md:self-auto">
             <div onClick={() => setCurrentView('profile')} className={`cursor-pointer group flex items-center gap-2 px-3 py-1 rounded-xl transition-all ${currentView === 'profile' ? 'bg-inverse text-on-inverse' : 'hover:bg-hovered'}`}>
               <p className="text-[10px] font-black uppercase leading-none">{currentUser.full_name}</p>
               <User size={14} />
@@ -532,6 +535,105 @@ function App() {
     )
   }
 
+  const renderSemaineMobile = () => {
+    const ouvres = daysInMonth.filter(d => getDay(d) !== 0 && getDay(d) !== 6)
+    const semaines = []
+    for (let i = 0; i < ouvres.length; i += 5) semaines.push(ouvres.slice(i, i + 5))
+    if (semaines.length === 0) return null
+
+    const index = Math.min(semaineMobile, semaines.length - 1)
+    const semaine = semaines[index]
+    const verrouille = meta?.closed
+
+    return (
+      <div className="md:hidden flex flex-col gap-4">
+        <div className="flex items-center justify-between bg-card rounded-2xl p-2 border border-line">
+          <button
+            onClick={() => setSemaineMobile(Math.max(0, index - 1))}
+            disabled={index === 0}
+            aria-label="Semaine précédente"
+            className="p-3 rounded-xl disabled:opacity-30"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <span className="font-black text-[10px] uppercase tracking-widest">
+            Semaine {index + 1} / {semaines.length}
+          </span>
+          <button
+            onClick={() => setSemaineMobile(Math.min(semaines.length - 1, index + 1))}
+            disabled={index === semaines.length - 1}
+            aria-label="Semaine suivante"
+            className="p-3 rounded-xl disabled:opacity-30"
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+
+        {activeRows.length === 0 && (
+          <p className="text-sm text-ink-muted px-2">
+            Ajoute un projet ou une activité pour commencer à saisir.
+          </p>
+        )}
+
+        {semaine.map(jour => {
+          const dateStr = format(jour, 'yyyy-MM-dd')
+          const ferie = feriesDuMois.has(dateStr)
+          const absent = (chargeAbsences[dateStr] ?? 0) >= 1
+          const total = activeRows.reduce(
+            (s, r) => s + (gridData[r.key]?.[dateStr] || 0), 0,
+          )
+
+          return (
+            <section key={dateStr} className="bg-card rounded-[20px] border-2 border-line p-4">
+              <header className="flex items-center justify-between mb-3">
+                <h3 className="font-black text-sm uppercase tracking-widest">
+                  {format(jour, 'EEEE d', { locale: fr })}
+                </h3>
+                {ferie ? (
+                  <span className="text-[10px] font-black uppercase tracking-widest text-ink-muted">Férié</span>
+                ) : absent ? (
+                  <span className="text-[10px] font-black uppercase tracking-widest text-primary">Absent</span>
+                ) : (
+                  <span className="text-[10px] font-black tracking-widest text-ink-muted">
+                    {total.toFixed(1)}
+                  </span>
+                )}
+              </header>
+
+              {!ferie && !absent && activeRows.map(row => {
+                const valeur = gridData[row.key]?.[dateStr] || 0
+                const nom = row.project_id
+                  ? (projects.find(p => p.id === row.project_id)?.name || row.activity_type)
+                  : row.activity_type
+                return (
+                  <div key={row.key} className="flex items-center justify-between gap-3 py-2 border-t border-line first:border-0">
+                    <span className="text-xs font-black truncate flex-1">{nom}</span>
+                    <div className="flex gap-1 shrink-0">
+                      {[0, 0.5, 1].map(v => (
+                        <button
+                          key={v}
+                          disabled={verrouille}
+                          onClick={() => updateCell(row.key, dateStr, v === 0 ? "" : String(v))}
+                          className={`min-w-[44px] min-h-[44px] rounded-xl text-xs font-black border-2 transition-all disabled:opacity-40 ${
+                            valeur === v
+                              ? 'bg-primary text-on-primary border-primary'
+                              : 'border-line text-ink-muted'
+                          }`}
+                        >
+                          {v === 0 ? '—' : v === 0.5 ? '½' : '1'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </section>
+          )
+        })}
+      </div>
+    )
+  }
+
   const renderSpreadsheet = () => (
     <main className="p-8 w-full">
       <div className="max-w-[100vw] mx-auto">
@@ -602,8 +704,11 @@ function App() {
           </div>
         </div>
 
-        <div className="bg-card rounded-[40px] shadow-2xl border border-line overflow-x-auto custom-scrollbar">
-          {renderBandeauMois()}
+        {renderBandeauMois()}
+
+        {renderSemaineMobile()}
+
+        <div className="hidden md:block bg-card rounded-[40px] shadow-2xl border border-line overflow-x-auto custom-scrollbar">
           <table className="w-full border-collapse min-w-[1500px]">
             <thead>
               <tr className="bg-input">
