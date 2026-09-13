@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import axios from 'axios'
-import { API_BASE, closePeriod, copyWeek, getTimesheet, messageErreur } from './api/client'
+import { API_BASE, closePeriod, getTimesheet, messageErreur } from './api/client'
 import { Conges } from './pages/Conges'
 import {
   format, startOfMonth, endOfMonth, eachDayOfInterval,
@@ -9,7 +9,7 @@ import {
 } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import {
-  ChevronLeft, ChevronRight, Briefcase, Calendar, Info, Plus,
+  ChevronDown, ChevronLeft, ChevronRight, Briefcase, Calendar, Info, Plus,
   Trash2, Save, AlertCircle, CheckCircle2, Loader2, User, LogOut, Lock, Key, Settings, Eye, EyeOff, Users, Layout, BarChart3,
   Moon, Sun
 } from 'lucide-react'
@@ -302,22 +302,6 @@ function App() {
     }
   }
 
-  const copierLaSemaine = async () => {
-    setMetaBusy(true)
-    setErrorMsg('')
-    try {
-      const lundi = new Date()
-      lundi.setDate(lundi.getDate() - ((lundi.getDay() + 6) % 7))
-      await copyWeek(format(lundi, 'yyyy-MM-dd'))
-      await fetchCRA()
-      await chargerMeta()
-    } catch (err) {
-      setErrorMsg(messageErreur(err, "La copie n'a pas abouti"))
-    } finally {
-      setMetaBusy(false)
-    }
-  }
-
   const monthStats = useMemo(() => {
     const workingDays = daysInMonth.filter(d => getDay(d) !== 0 && getDay(d) !== 6).length;
     let totalEntered = 0;
@@ -495,66 +479,71 @@ function App() {
   const renderSpreadsheet = () => (
     <main className="p-8 w-full">
       <div className="max-w-[100vw] mx-auto">
-        <div className="flex items-start justify-between gap-6 flex-wrap mb-10">
-          <div>
-            <h2 className="text-5xl font-black uppercase tracking-tighter mb-4">Mon activité</h2>
-            <div className="flex items-start gap-6 flex-wrap">
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center bg-card rounded-2xl p-2 shadow-sm border border-line">
-                  <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-hovered p-2 rounded-xl transition-all"><ChevronLeft size={20} /></button>
-                  <span className="px-6 font-black text-sm uppercase tracking-widest min-w-[180px] text-center">{format(currentDate, 'MMMM yyyy', { locale: fr })}</span>
-                  <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="hover:bg-hovered p-2 rounded-xl transition-all"><ChevronRight size={20} /></button>
-                </div>
-                <div className="px-4 flex items-center gap-2">
-                  <div className="h-1.5 flex-1 bg-track rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-primary transition-all duration-500"
-                      style={{ width: `${Math.min(100, (monthStats.totalEntered / monthStats.workingDays) * 100)}%` }}
-                    ></div>
-                  </div>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-ink-muted whitespace-nowrap">
-                    {monthStats.totalEntered.toFixed(1)} / {monthStats.workingDays} UNITÉS
-                  </span>
-                </div>
-              </div>
-              <div className="flex gap-2 self-start mt-1 flex-wrap">
-                <button
-                  type="button"
-                  onClick={copierLaSemaine}
-                  disabled={metaBusy || meta?.closed}
-                  className="bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-primary disabled:opacity-40"
-                >
-                  Copier la semaine précédente
-                </button>
-                <button
-                  type="button"
-                  onClick={cloturerLeMois}
-                  disabled={metaBusy || meta?.closed}
-                  className="bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-primary disabled:opacity-40"
-                >
-                  {meta?.closed ? 'Mois clôturé' : 'Clôturer le mois'}
-                </button>
-                <select
-                  onChange={(e) => {
-                    const pid = e.target.value; if (!pid) return;
-                    const p = (currentUser.is_admin ? projects : userProjects).find(proj => proj.id === parseInt(pid));
-                    addRow(p.category, p.id); e.target.value = "";
-                  }}
-                  className="bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] cursor-pointer"
-                >
-                  <option value="">+ Ajouter un projet</option>
-                  {(currentUser.is_admin ? projects : userProjects).map(p => <option key={p.id} value={p.id}>{p.name} ({p.category})</option>)}
-                </select>
-                <button onClick={() => addRow('Absence')} className="bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-danger transition-all">+ Absence</button>
-                <button onClick={() => addRow('Formation')} className="bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-warning transition-all">+ Formation</button>
-                <button onClick={() => addRow('Férié')} className="bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-success transition-all">+ Férié</button>
-              </div>
+        <div className="mb-10">
+          <h2 className="text-5xl font-black uppercase tracking-tighter mb-4">Mon activité</h2>
+
+          {/* Une seule rangee d'actions : elle defile horizontalement plutot
+              que de passer a la ligne, pour garder Sauvegarder a cote du reste. */}
+          <div className="flex items-center gap-2 flex-nowrap overflow-x-auto custom-scrollbar pb-2">
+            <div className="flex items-center bg-card rounded-2xl p-2 shadow-sm border border-line shrink-0">
+              <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-hovered p-2 rounded-xl transition-all"><ChevronLeft size={18} /></button>
+              <span className="px-4 font-black text-xs uppercase tracking-widest min-w-[150px] text-center">{format(currentDate, 'MMMM yyyy', { locale: fr })}</span>
+              <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="hover:bg-hovered p-2 rounded-xl transition-all"><ChevronRight size={18} /></button>
             </div>
+
+            <div className="relative shrink-0">
+              <select
+                onChange={(e) => {
+                  const pid = e.target.value; if (!pid) return;
+                  const p = (currentUser.is_admin ? projects : userProjects).find(proj => proj.id === parseInt(pid));
+                  addRow(p.category, p.id); e.target.value = "";
+                }}
+                className="appearance-none w-[220px] truncate bg-card border-2 border-line rounded-2xl pl-6 pr-11 py-3 font-black uppercase text-[10px] tracking-widest cursor-pointer hover:border-primary transition-all"
+                style={{ fontFamily: 'var(--font-sans)' }}
+              >
+                <option value="">+ Ajouter un projet</option>
+                {(currentUser.is_admin ? projects : userProjects).map(p => <option key={p.id} value={p.id}>{p.name} ({p.category})</option>)}
+              </select>
+              <ChevronDown
+                size={14}
+                className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-ink-muted"
+              />
+            </div>
+
+            <button onClick={() => addRow('Absence')} className="shrink-0 bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] tracking-widest hover:border-danger transition-all">+ Absence</button>
+            <button onClick={() => addRow('Formation')} className="shrink-0 bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] tracking-widest hover:border-warning transition-all">+ Formation</button>
+            <button onClick={() => addRow('Férié')} className="shrink-0 bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] tracking-widest hover:border-success transition-all">+ Férié</button>
+
+            <button
+              type="button"
+              onClick={cloturerLeMois}
+              disabled={metaBusy || meta?.closed}
+              className="shrink-0 bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] tracking-widest hover:border-primary transition-all disabled:opacity-40"
+            >
+              {meta?.closed ? 'Mois clôturé' : 'Clôturer le mois'}
+            </button>
+
+            <button
+              onClick={saveCRA}
+              disabled={loading || meta?.closed}
+              className={`shrink-0 ml-auto flex items-center gap-2 px-8 py-3 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all shadow-lg disabled:opacity-40 ${saveStatus === 'success' ? 'bg-success text-on-primary' : 'bg-primary text-on-primary hover:scale-105'}`}
+            >
+              {loading ? <Loader2 className="animate-spin" size={16} /> : (saveStatus === 'success' ? <CheckCircle2 size={16} /> : <Save size={16} />)}
+              {saveStatus === 'success' ? 'Enregistré' : 'Sauvegarder'}
+            </button>
           </div>
-          <button onClick={saveCRA} disabled={loading || meta?.closed} className={`flex items-center gap-3 px-10 py-5 rounded-3xl font-black uppercase text-sm transition-all shadow-xl disabled:opacity-40 ${saveStatus === 'success' ? 'bg-success text-on-primary' : 'bg-primary text-on-primary hover:scale-105 hover:shadow-2xl'}`}>
-            {loading ? <Loader2 className="animate-spin" size={20} /> : (saveStatus === 'success' ? <CheckCircle2 size={20} /> : <Save size={20} />)}
-            {saveStatus === 'success' ? 'Enregistré' : 'Sauvegarder'}
-          </button>
+
+          <div className="flex items-center gap-2 mt-3 max-w-[420px]">
+            <div className="h-1.5 flex-1 bg-track rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-500"
+                style={{ width: `${Math.min(100, (monthStats.totalEntered / monthStats.workingDays) * 100)}%` }}
+              ></div>
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-widest text-ink-muted whitespace-nowrap">
+              {monthStats.totalEntered.toFixed(1)} / {monthStats.workingDays} UNITÉS
+            </span>
+          </div>
         </div>
 
         <div className="bg-card rounded-[40px] shadow-2xl border border-line overflow-x-auto custom-scrollbar">
