@@ -308,7 +308,9 @@ function App() {
   const getDayTotal = (dateStr) => {
     let total = 0;
     activeRows.forEach(row => { total += (gridData[row.key]?.[dateStr] || 0); });
-    return total;
+    // Un congé validé occupe la journée : l'ignorer afficherait 0 sur un
+    // jour pourtant complet, et le bandeau le compterait comme un trou.
+    return total + (chargeAbsences[dateStr] || 0);
   };
 
   // Metadonnees du mois : feries, absences approuvees, cloture, trous.
@@ -563,9 +565,7 @@ function App() {
           const dateStr = format(jour, 'yyyy-MM-dd')
           const ferie = feriesDuMois.has(dateStr)
           const absent = (chargeAbsences[dateStr] ?? 0) >= 1
-          const total = activeRows.reduce(
-            (s, r) => s + (gridData[r.key]?.[dateStr] || 0), 0,
-          )
+          const total = getDayTotal(dateStr)
 
           return (
             <section key={dateStr} className="bg-card rounded-[20px] border-2 border-line p-4">
@@ -583,6 +583,17 @@ function App() {
                   </span>
                 )}
               </header>
+
+              {!ferie && (chargeAbsences[dateStr] || 0) > 0 && (
+                <div className="flex items-center justify-between gap-3 py-2 border-t border-line first:border-0">
+                  <span className="text-xs font-black truncate flex-1 text-primary">
+                    Absence validée
+                  </span>
+                  <span className="text-xs font-black text-primary px-3">
+                    {chargeAbsences[dateStr].toFixed(1)}
+                  </span>
+                </div>
+              )}
 
               {!ferie && !absent && activeRows.map(row => {
                 const valeur = gridData[row.key]?.[dateStr] || 0
@@ -726,6 +737,30 @@ function App() {
               </tr>
             </thead>
             <tbody>
+              {/* Les congés validés forment une ligne à part, pré-remplie et non
+                  saisissable. Elle n'est pas enregistrée avec le CRA : la source
+                  reste la demande de congé, la dupliquer en entrée la compterait
+                  deux fois dans le bilan. */}
+              {Object.keys(chargeAbsences).length > 0 && (
+                <tr className="border-b border-line text-sm font-black uppercase bg-primary-soft">
+                  <td className="sticky left-0 z-10 bg-primary-soft p-6 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)]">
+                    <span className="text-primary">Absences validées</span>
+                  </td>
+                  {daysInMonth.map(day => {
+                    const dateStr = format(day, 'yyyy-MM-dd');
+                    const valeur = chargeAbsences[dateStr] || 0;
+                    return (
+                      <td key={dateStr} className="p-2 border-r border-line text-center text-primary">
+                        {valeur ? valeur.toFixed(1) : ''}
+                      </td>
+                    );
+                  })}
+                  <td className="p-6 text-center text-primary">
+                    {Object.values(chargeAbsences).reduce((s, v) => s + v, 0).toFixed(1)}
+                  </td>
+                </tr>
+              )}
+
               {activeRows.map(row => {
                 let totalRow = 0;
                 return (
