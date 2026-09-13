@@ -11,6 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 from holidays import holidays_for_range
+from leaves import LeaveError, count_leave_days, overlaps
 from auth import (
     bearer_scheme,
     create_access_token,
@@ -185,6 +186,59 @@ class PublicHoliday(SQLModel, table=True):
     label: str
 
 
+LEAVE_STATUSES = ("pending", "approved", "rejected", "cancelled")
+
+
+class LeaveType(SQLModel, table=True):
+    """Nature d'une absence. Alimente par seed_leave_types.py."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(unique=True, index=True)  # CP, RTT, MALADIE...
+    label: str
+    counts_against_balance: bool = True
+    color: Optional[str] = None
+
+
+class LeaveRequest(SQLModel, table=True):
+    """Demande d'absence, de son depot a sa decision.
+
+    `days` est fige a la creation plutot que recalcule a la lecture : si un
+    ferie est ajoute apres coup, le solde deja arrete ne doit pas bouger
+    dans le dos du salarie.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    leave_type_id: int = Field(foreign_key="leavetype.id")
+
+    start_date: DateType = Field(index=True)
+    end_date: DateType
+    start_half: Optional[str] = None  # nul = journee entiere
+    end_half: Optional[str] = None
+    days: float
+
+    reason: Optional[str] = None
+    status: str = Field(default="pending", index=True)
+    decided_by: Optional[int] = Field(default=None, foreign_key="user.id")
+    decided_at: Optional[datetime] = None
+    decision_comment: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+class LeaveBalance(SQLModel, table=True):
+    """Droits acquis d'un utilisateur pour une annee et un type d'absence.
+
+    Le solde restant n'est pas stocke : il se deduit des demandes approuvees,
+    seule source qui ne puisse pas se desynchroniser.
+    """
+
+    user_id: int = Field(foreign_key="user.id", primary_key=True)
+    year: int = Field(primary_key=True)
+    leave_type_id: int = Field(foreign_key="leavetype.id", primary_key=True)
+    acquired: float = 0.0
+    adjustment: float = 0.0  # reprise d'anteriorite, correction admin
+
+
 class CRAEntry(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     date: date
@@ -235,6 +289,29 @@ class ProjectCreateUpdate(BaseModel):
     end_date: Optional[date] = None
     sold_days: Optional[float] = None
     status: str = "active"
+
+
+class LeaveCreate(BaseModel):
+    leave_type_id: int
+    start_date: date
+    end_date: date
+    start_half: Optional[str] = None
+    end_half: Optional[str] = None
+    reason: Optional[str] = None
+    user_id: Optional[int] = None  # admin uniquement : deposer pour un autre
+
+
+class LeaveDecision(BaseModel):
+    approve: bool
+    comment: Optional[str] = None
+
+
+class BalanceUpdate(BaseModel):
+    user_id: int
+    year: int
+    leave_type_id: int
+    acquired: float = 0.0
+    adjustment: float = 0.0
 
 
 class AssignmentUpdate(BaseModel):
@@ -595,6 +672,297 @@ def read_holidays(
         )
     jours = session.exec(requete.order_by(PublicHoliday.date)).all()
     return [{"date": j.date, "label": j.label} for j in jours]
+
+
+# --- Conges ---------------------------------------------------------------
+
+
+def charger_feries(session: Session, start: date, end: date) -> set[date]:
+    jours = session.exec(
+        select(PublicHoliday).where(
+            PublicHoliday.date >= start, PublicHoliday.date <= end
+        )
+    ).all()
+    return {j.date for j in jours}
+
+
+def demande_en_dict(demande: LeaveRequest) -> dict:
+    return demande.model_dump()
+
+
+@app.get("/leaves/types", response_model=List[LeaveType])
+def read_leave_types(
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    return session.exec(select(LeaveType).order_by(LeaveType.code)).all()
+
+
+@app.get("/leaves")
+def read_leaves(
+    user_id: Optional[int] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+    status: Optional[str] = None,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Demandes filtrees. Lecture ouverte a toute l'equipe (SPEC §4)."""
+    requete = select(LeaveRequest)
+    if user_id is not None:
+        requete = requete.where(LeaveRequest.user_id == user_id)
+    if from_date is not None:
+        requete = requete.where(LeaveRequest.end_date >= from_date)
+    if to_date is not None:
+        requete = requete.where(LeaveRequest.start_date <= to_date)
+    if status is not None:
+        requete = requete.where(LeaveRequest.status == status)
+    demandes = session.exec(requete.order_by(LeaveRequest.start_date)).all()
+    return [demande_en_dict(d) for d in demandes]
+
+
+@app.post("/leaves")
+def create_leave(
+    req: LeaveCreate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Depose une demande. Le decompte est calcule ici, pas envoye par le client."""
+    cible = current_user.id
+    if req.user_id is not None and req.user_id != current_user.id:
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Demande possible uniquement pour soi-meme",
+            )
+        cible = req.user_id
+
+    if not session.get(LeaveType, req.leave_type_id):
+        raise HTTPException(status_code=404, detail="Type d'absence inconnu")
+
+    # Le chevauchement se juge sur les demandes vivantes : une demande
+    # refusee ou annulee ne bloque pas une nouvelle tentative.
+    vivantes = session.exec(
+        select(LeaveRequest).where(
+            LeaveRequest.user_id == cible,
+            LeaveRequest.status.in_(("pending", "approved")),
+        )
+    ).all()
+    for autre in vivantes:
+        if overlaps(req.start_date, req.end_date, autre.start_date, autre.end_date):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Chevauchement avec une demande du {autre.start_date} "
+                    f"au {autre.end_date}"
+                ),
+            )
+
+    feries = charger_feries(session, req.start_date, req.end_date)
+    try:
+        jours = count_leave_days(
+            req.start_date, req.end_date, feries, req.start_half, req.end_half
+        )
+    except LeaveError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if jours <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Cette periode ne contient aucun jour ouvre",
+        )
+
+    demande = LeaveRequest(
+        user_id=cible,
+        leave_type_id=req.leave_type_id,
+        start_date=req.start_date,
+        end_date=req.end_date,
+        start_half=req.start_half,
+        end_half=req.end_half,
+        days=jours,
+        reason=req.reason,
+    )
+    session.add(demande)
+    session.commit()
+    session.refresh(demande)
+    return demande_en_dict(demande)
+
+
+@app.post("/leaves/{leave_id}/decide")
+def decide_leave(
+    leave_id: int,
+    req: LeaveDecision,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_admin),
+):
+    demande = session.get(LeaveRequest, leave_id)
+    if not demande:
+        raise HTTPException(status_code=404, detail="Demande introuvable")
+    if demande.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cette demande est deja {demande.status}",
+        )
+
+    demande.status = "approved" if req.approve else "rejected"
+    demande.decided_by = admin.id
+    demande.decided_at = datetime.now()
+    demande.decision_comment = req.comment
+    session.add(demande)
+    session.commit()
+    session.refresh(demande)
+    return demande_en_dict(demande)
+
+
+@app.post("/leaves/{leave_id}/cancel")
+def cancel_leave(
+    leave_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Annule une demande.
+
+    Une demande approuvee dont la date est passee exige l'accord de l'admin :
+    le temps a ete pose, le retirer seul reecrirait l'historique.
+    """
+    demande = session.get(LeaveRequest, leave_id)
+    if not demande:
+        raise HTTPException(status_code=404, detail="Demande introuvable")
+    if demande.user_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Annulation possible uniquement sur ses propres demandes",
+        )
+    if demande.status in ("rejected", "cancelled"):
+        raise HTTPException(
+            status_code=409, detail=f"Cette demande est deja {demande.status}"
+        )
+    if (
+        demande.status == "approved"
+        and demande.start_date < date.today()
+        and not current_user.is_admin
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Une absence deja commencee ne s'annule qu'avec l'accord d'un administrateur",
+        )
+
+    demande.status = "cancelled"
+    session.add(demande)
+    session.commit()
+    session.refresh(demande)
+    return demande_en_dict(demande)
+
+
+@app.get("/leaves/balances")
+def read_balances(
+    year: Optional[int] = None,
+    user_id: Optional[int] = None,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Soldes par utilisateur et par type.
+
+    `remaining = acquired + adjustment - approuves`. Les demandes en attente
+    sont exposees a part et jamais deduites : tant qu'elles ne sont pas
+    validees, le droit reste acquis.
+    """
+    annee = year or date.today().year
+    debut, fin = date(annee, 1, 1), date(annee, 12, 31)
+
+    requete = select(LeaveBalance).where(LeaveBalance.year == annee)
+    if user_id is not None:
+        requete = requete.where(LeaveBalance.user_id == user_id)
+    soldes = session.exec(requete).all()
+
+    demandes = session.exec(
+        select(LeaveRequest).where(
+            LeaveRequest.start_date >= debut,
+            LeaveRequest.start_date <= fin,
+            LeaveRequest.status.in_(("pending", "approved")),
+        )
+    ).all()
+
+    consomme: dict[tuple[int, int], float] = {}
+    attente: dict[tuple[int, int], float] = {}
+    for d in demandes:
+        cle = (d.user_id, d.leave_type_id)
+        cible = consomme if d.status == "approved" else attente
+        cible[cle] = cible.get(cle, 0.0) + d.days
+
+    return [
+        {
+            "user_id": s.user_id,
+            "year": s.year,
+            "leave_type_id": s.leave_type_id,
+            "acquired": s.acquired,
+            "adjustment": s.adjustment,
+            "taken": consomme.get((s.user_id, s.leave_type_id), 0.0),
+            "pending": attente.get((s.user_id, s.leave_type_id), 0.0),
+            "remaining": round(
+                s.acquired
+                + s.adjustment
+                - consomme.get((s.user_id, s.leave_type_id), 0.0),
+                2,
+            ),
+        }
+        for s in soldes
+    ]
+
+
+@app.put("/leaves/balances")
+def upsert_balance(
+    req: BalanceUpdate,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+):
+    """Pose ou corrige les droits acquis. Reserve a l'administration."""
+    if not session.get(LeaveType, req.leave_type_id):
+        raise HTTPException(status_code=404, detail="Type d'absence inconnu")
+
+    cle = (req.user_id, req.year, req.leave_type_id)
+    solde = session.get(LeaveBalance, cle)
+    if solde is None:
+        solde = LeaveBalance(**req.model_dump())
+    else:
+        solde.acquired = req.acquired
+        solde.adjustment = req.adjustment
+    session.add(solde)
+    session.commit()
+    return {"status": "ok"}
+
+
+@app.get("/leaves/team-calendar")
+def read_team_calendar(
+    from_date: date,
+    to_date: date,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Qui est absent quand, sur la periode. Absences approuvees seulement."""
+    demandes = session.exec(
+        select(LeaveRequest).where(
+            LeaveRequest.status == "approved",
+            LeaveRequest.end_date >= from_date,
+            LeaveRequest.start_date <= to_date,
+        ).order_by(LeaveRequest.start_date)
+    ).all()
+    utilisateurs = {u.id: u.full_name for u in session.exec(select(User)).all()}
+    types = {t.id: t.code for t in session.exec(select(LeaveType)).all()}
+
+    return [
+        {
+            "user_id": d.user_id,
+            "full_name": utilisateurs.get(d.user_id),
+            "leave_type": types.get(d.leave_type_id),
+            "start_date": d.start_date,
+            "end_date": d.end_date,
+            "start_half": d.start_half,
+            "end_half": d.end_half,
+            "days": d.days,
+        }
+        for d in demandes
+    ]
 
 
 @app.post("/cra/batch")

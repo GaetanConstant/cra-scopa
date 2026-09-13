@@ -23,6 +23,9 @@ import main  # noqa: E402
 from main import (  # noqa: E402
     Client,
     CRAEntry,
+    LeaveBalance,
+    LeaveRequest,
+    LeaveType,
     Project,
     PublicHoliday,
     User,
@@ -40,7 +43,18 @@ def base_vierge() -> Iterator[None]:
     """Chaque test part d'un schéma vide, pour ne pas dépendre de l'ordre."""
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
-        for model in (CRAEntry, UserProjectLink, Project, Client, PublicHoliday, User):
+        modeles = (
+            CRAEntry,
+            UserProjectLink,
+            LeaveRequest,
+            LeaveBalance,
+            LeaveType,
+            Project,
+            Client,
+            PublicHoliday,
+            User,
+        )
+        for model in modeles:
             session.exec(delete(model))
         session.commit()
     yield
