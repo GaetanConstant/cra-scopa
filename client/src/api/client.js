@@ -39,6 +39,8 @@ axios.interceptors.response.use(
 const get = (chemin, params) => axios.get(`${API_BASE}${chemin}`, { params }).then((r) => r.data)
 const post = (chemin, corps) => axios.post(`${API_BASE}${chemin}`, corps).then((r) => r.data)
 const put = (chemin, corps) => axios.put(`${API_BASE}${chemin}`, corps).then((r) => r.data)
+const patch = (chemin, corps) => axios.patch(`${API_BASE}${chemin}`, corps).then((r) => r.data)
+const del = (chemin) => axios.delete(`${API_BASE}${chemin}`).then((r) => r.data)
 
 /**
  * Message d'erreur lisible pour l'utilisateur.
@@ -78,3 +80,15 @@ export const copyWeek = (target_week_start, user_id) => post('/time/copy-week', 
 
 export const getHolidays = (year) => get('/holidays', { year })
 export const getUsers = () => get('/users/')
+
+// --- Tickets ---------------------------------------------------------------
+
+export const getBoard = (params) => get('/tickets/board', params)
+export const getTicket = (id) => get(`/tickets/${id}`)
+export const createTicket = (corps) => post('/tickets', corps)
+export const patchTicket = (id, corps) => patch(`/tickets/${id}`, corps)
+export const moveTicket = (id, corps) => post(`/tickets/${id}/move`, corps)
+export const deleteTicket = (id) => del(`/tickets/${id}`)
+export const addComment = (id, body) => post(`/tickets/${id}/comments`, { body })
+export const getTags = () => get('/tickets/tags')
+export const createTag = (corps) => post('/tickets/tags', corps)

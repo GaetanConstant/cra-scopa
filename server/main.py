@@ -1278,10 +1278,13 @@ def read_board(
 
     if done_since_days > 0:
         limite = datetime.now() - timedelta(days=done_since_days)
+        # Une carte `done` sans date de cloture reste visible : elle vient
+        # d'un import ou d'un statut pose a la creation, la masquer la ferait
+        # disparaitre du tableau sans qu'on sache pourquoi.
         cartes = [
             c
             for c in cartes
-            if c.status != "done" or (c.closed_at and c.closed_at >= limite)
+            if c.status != "done" or c.closed_at is None or c.closed_at >= limite
         ]
 
     colonnes = {statut: [] for statut in TICKET_STATUSES}

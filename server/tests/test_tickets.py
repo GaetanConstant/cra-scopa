@@ -439,3 +439,22 @@ def test_commentaire_vide_refuse(
         f"/tickets/{ticket['id']}/comments", json={"body": "   "}, headers=entetes_consultant
     )
     assert reponse.status_code == 422
+
+
+def test_done_sans_date_de_cloture_reste_visible(
+    client: TestClient, entetes_consultant: dict[str, str]
+) -> None:
+    """Une carte créée directement en `done` n'a pas de date : ne pas la masquer."""
+    from sqlmodel import Session
+
+    from main import TkTicket, engine
+
+    ticket = _ticket(client, entetes_consultant, status="done")
+    with Session(engine) as session:
+        carte = session.get(TkTicket, ticket["id"])
+        carte.closed_at = None
+        session.add(carte)
+        session.commit()
+
+    board = client.get("/tickets/board", headers=entetes_consultant).json()
+    assert [t["id"] for t in board["done"]] == [ticket["id"]]
