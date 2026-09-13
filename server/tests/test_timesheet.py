@@ -1,6 +1,8 @@
-"""Saisie du CRA : capacité, absences, affectations, copie de semaine, clôture.
+"""Saisie du CRA : quantités, absences, affectations, copie de semaine, clôture.
 
-Couvre l'étape 4 de SPEC-CRA.md §13 et les cinq critères « Temps » du §12.
+Couvre l'étape 4 de SPEC-CRA.md §13 et les critères « Temps » du §12, à
+l'exception du plafond d'une journée : SCOPA impute plusieurs missions sur
+une même date, la surcharge est signalée et non refusée.
 """
 
 from datetime import date
@@ -15,9 +17,9 @@ from seed_holidays import seed as seed_holidays
 from seed_leave_types import seed as seed_leave_types
 from timesheet import (
     TimesheetError,
-    check_capacity,
     check_quantities,
     missing_working_days,
+    overloaded_days,
     period_bounds,
     period_of,
 )
@@ -48,23 +50,20 @@ def test_quantite_negative() -> None:
         check_quantities([(date(2026, 6, 1), -1.0)])
 
 
-def test_deux_demi_journees_le_meme_jour_sont_valides() -> None:
-    check_capacity([(date(2026, 6, 1), 0.5), (date(2026, 6, 1), 0.5)], {})
+def test_journee_pleine_n_est_pas_signalee() -> None:
+    assert overloaded_days([(date(2026, 6, 1), 0.5), (date(2026, 6, 1), 0.5)], {}) == {}
 
 
-def test_trois_demi_journees_le_meme_jour_sont_refusees() -> None:
-    with pytest.raises(TimesheetError):
-        check_capacity(
-            [(date(2026, 6, 1), 0.5), (date(2026, 6, 1), 0.5), (date(2026, 6, 1), 0.5)],
-            {},
-        )
-
-
-def test_demi_journee_de_conge_laisse_une_demi_journee() -> None:
+def test_journee_chargee_est_signalee_sans_bloquer() -> None:
+    """Plusieurs missions se cumulent sur une journée : on le remonte, on ne l'interdit pas."""
     jour = date(2026, 6, 1)
-    check_capacity([(jour, 0.5)], {jour: 0.5})
-    with pytest.raises(TimesheetError):
-        check_capacity([(jour, 1.0)], {jour: 0.5})
+    assert overloaded_days([(jour, 1.0), (jour, 1.0)], {}) == {jour: 2.0}
+
+
+def test_conge_compte_dans_la_charge_signalee() -> None:
+    jour = date(2026, 6, 1)
+    assert overloaded_days([(jour, 1.0)], {jour: 0.5}) == {jour: 1.5}
+    assert overloaded_days([(jour, 0.5)], {jour: 0.5}) == {}
 
 
 def test_jours_ouvres_manquants() -> None:
@@ -125,13 +124,13 @@ def _enregistrer(client: TestClient, entetes: dict[str, str], lignes: list[dict]
     return client.post("/cra/batch", json=lignes, headers=entetes)
 
 
-# --- Capacité journalière --------------------------------------------------
+# --- Quantités et cumul --------------------------------------------------
 
 
 def test_deux_demi_journees_sur_deux_projets(
     client: TestClient, entetes_admin: dict[str, str], admin_id: int
 ) -> None:
-    """§12 — deux demi-journées le même jour passent, une troisième non."""
+    """Deux demi-journées le même jour, sur deux missions."""
     a = _projet(client, entetes_admin, name="MISSION-A")
     b = _projet(client, entetes_admin, name="MISSION-B")
     reponse = _enregistrer(
@@ -145,22 +144,27 @@ def test_deux_demi_journees_sur_deux_projets(
     assert reponse.status_code == 200
 
 
-def test_troisieme_demi_journee_refusee(
+def test_deux_journees_pleines_le_meme_jour_sont_acceptees(
     client: TestClient, entetes_admin: dict[str, str], admin_id: int
 ) -> None:
+    """Décision SCOPA : plusieurs missions se cumulent sur une journée.
+
+    La vue mensuelle le signale dans `overloaded_days`, la saisie ne l'interdit pas.
+    """
     a = _projet(client, entetes_admin, name="MISSION-A")
     b = _projet(client, entetes_admin, name="MISSION-B")
-    c = _projet(client, entetes_admin, name="MISSION-C")
     reponse = _enregistrer(
         client,
         entetes_admin,
         [
-            _ligne("2026-06-01", admin_id, 0.5, a["id"]),
-            _ligne("2026-06-01", admin_id, 0.5, b["id"]),
-            _ligne("2026-06-01", admin_id, 0.5, c["id"]),
+            _ligne("2026-06-01", admin_id, 1.0, a["id"]),
+            _ligne("2026-06-01", admin_id, 1.0, b["id"]),
         ],
     )
-    assert reponse.status_code == 422
+    assert reponse.status_code == 200
+
+    vue = client.get("/time?period=2026-06", headers=entetes_admin).json()
+    assert vue["overloaded_days"] == {"2026-06-01": 2.0}
 
 
 def test_quantite_hors_pas_refusee_par_l_api(
@@ -206,14 +210,14 @@ def _poser_conge_approuve(
     )
 
 
-def test_jour_de_conge_bloque_la_saisie(
+def test_saisie_sur_un_jour_de_conge_est_signalee(
     client: TestClient,
     entetes_admin: dict[str, str],
     entetes_consultant: dict[str, str],
     cp_id: int,
     consultant_id: int,
 ) -> None:
-    """§12 — un jour de congé approuvé est couvert, on n'y saisit rien de plus."""
+    """Saisir sur un jour déjà posé reste possible, mais remonte comme surcharge."""
     projet = _projet(client, entetes_admin)
     _affecter(client, entetes_admin, consultant_id, projet["id"])
     _poser_conge_approuve(
@@ -225,11 +229,13 @@ def test_jour_de_conge_bloque_la_saisie(
         entetes_consultant,
         [_ligne("2026-06-01", consultant_id, 1.0, projet["id"])],
     )
-    assert reponse.status_code == 422
-    assert "absence approuvée" in reponse.json()["detail"]
+    assert reponse.status_code == 200
+
+    vue = client.get("/time?period=2026-06", headers=entetes_consultant).json()
+    assert vue["overloaded_days"] == {"2026-06-01": 2.0}
 
 
-def test_demi_journee_de_conge_laisse_saisir_l_autre_moitie(
+def test_demi_journee_de_conge_et_demi_journee_saisie_font_une_journee(
     client: TestClient,
     entetes_admin: dict[str, str],
     entetes_consultant: dict[str, str],

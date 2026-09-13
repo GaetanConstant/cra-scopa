@@ -62,26 +62,24 @@ def check_quantities(entries: Sequence[tuple[date, float]]) -> None:
             )
 
 
-def check_capacity(
+def overloaded_days(
     entries: Sequence[tuple[date, float]],
     leave_load: Mapping[date, float],
-) -> None:
-    """Le total d'une journée, absences comprises, ne dépasse pas 1,0.
+) -> dict[date, float]:
+    """Journées dont le total, absences comprises, dépasse 1,0.
 
-    Une demi-journée de congé laisse 0,5 disponible : c'est la règle qui
-    empêche de facturer un jour posé.
+    Ce n'est pas une erreur : plusieurs missions se cumulent légitimement sur
+    une même journée chez SCOPA. On le remonte pour que l'écran puisse le
+    signaler, et parce que ces journées font monter le taux d'occupation
+    au-dessus de 100 % — mieux vaut savoir d'où ça vient.
     """
     totaux = daily_totals(entries)
-    for jour in sorted(set(totaux) | set(leave_load)):
-        saisi = totaux.get(jour, 0.0)
-        absent = leave_load.get(jour, 0.0)
-        if round(saisi + absent, 2) > FULL_DAY:
-            if absent:
-                raise TimesheetError(
-                    f"Le {jour} : {saisi} saisi(s) alors que {absent} est déjà "
-                    f"couvert par une absence approuvée"
-                )
-            raise TimesheetError(f"Le {jour} dépasse une journée ({saisi})")
+    charges = {}
+    for jour in set(totaux) | set(leave_load):
+        total = round(totaux.get(jour, 0.0) + leave_load.get(jour, 0.0), 2)
+        if total > FULL_DAY:
+            charges[jour] = total
+    return dict(sorted(charges.items()))
 
 
 def missing_working_days(

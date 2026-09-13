@@ -14,9 +14,9 @@ from holidays import holidays_for_range
 from leaves import LeaveError, count_leave_days, daily_load, overlaps
 from timesheet import (
     TimesheetError,
-    check_capacity,
     check_quantities,
     missing_working_days,
+    overloaded_days,
     period_bounds,
     period_of,
 )
@@ -1101,6 +1101,12 @@ def read_timesheet(
         "holidays": sorted(str(j) for j in feries),
         "closed": cloture is not None and cloture.status == "closed",
         "closed_at": cloture.closed_at if cloture else None,
+        "overloaded_days": {
+            str(j): v
+            for j, v in overloaded_days(
+                [(l.date, l.duration_factor) for l in lignes], absences
+            ).items()
+        },
         "missing_days": [
             str(j)
             for j in missing_working_days(
@@ -1244,16 +1250,6 @@ def copy_week(
             )
         ).all()
     }
-    charge_existante = {}
-    for l in session.exec(
-        select(CRAEntry).where(
-            CRAEntry.user_id == cible,
-            CRAEntry.date >= debut_cible,
-            CRAEntry.date <= fin_cible,
-        )
-    ).all():
-        charge_existante[l.date] = charge_existante.get(l.date, 0.0) + l.duration_factor
-
     projets = {p.id: p for p in session.exec(select(Project)).all()}
     crees = ignores = 0
 
@@ -1273,11 +1269,6 @@ def copy_week(
             ignores += 1
             continue
 
-        occupe = charge_existante.get(cible_jour, 0.0) + absences.get(cible_jour, 0.0)
-        if round(occupe + ligne.duration_factor, 2) > 1.0:
-            ignores += 1
-            continue
-
         session.add(
             CRAEntry(
                 date=cible_jour,
@@ -1287,7 +1278,6 @@ def copy_week(
                 project_id=ligne.project_id,
             )
         )
-        charge_existante[cible_jour] = occupe + ligne.duration_factor
         crees += 1
 
     session.commit()
@@ -1338,11 +1328,9 @@ def create_cra_batch(
             detail=f"La periode {periode} est cloturee. Un administrateur doit la rouvrir.",
         )
 
-    debut, fin = period_bounds(periode)
     lignes = [(e.date, e.duration_factor) for e in entries]
     try:
         check_quantities(lignes)
-        check_capacity(lignes, charge_absences(session, user_id, debut, fin))
         if not current_user.is_admin:
             verifier_affectations(session, user_id, entries)
     except TimesheetError as exc:
