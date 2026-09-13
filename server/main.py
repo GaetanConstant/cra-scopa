@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from holidays import holidays_for_range
 from leaves import LeaveError, count_leave_days, daily_load, overlaps
+from positions import GAP, needs_rebalance, position_between, rebalance
 from timesheet import (
     TimesheetError,
     check_quantities,
@@ -261,6 +262,84 @@ class MonthClosure(SQLModel, table=True):
     closed_by: Optional[int] = Field(default=None, foreign_key="user.id")
 
 
+TICKET_STATUSES = ("todo", "in_progress", "to_validate", "done")
+TICKET_PRIORITIES = ("low", "medium", "high", "urgent")
+
+
+class TkTicket(SQLModel, table=True):
+    """Carte du kanban.
+
+    Le prefixe `tk_` des noms de table vient de SPEC-CRA.md §5D : il isole
+    d'un coup d'oeil les tables du module tickets de celles du CRA.
+    """
+
+    __tablename__ = "tk_tickets"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    description: Optional[str] = None
+    status: str = Field(default="todo", index=True)
+    priority: str = "medium"
+    assignee_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
+    reporter_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    position: float = 0.0
+    due_date: Optional[DateType] = None
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    closed_at: Optional[datetime] = None
+
+
+class TkTag(SQLModel, table=True):
+    """Etiquette. Adossee a une mission ou libre (theme, categorie).
+
+    Une etiquette utilisee ne se supprime pas, elle s'archive : la retirer
+    effacerait le classement de tickets deja clos.
+    """
+
+    __tablename__ = "tk_tags"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)
+    color: Optional[str] = None
+    mission_id: Optional[int] = Field(default=None, foreign_key="project.id")
+    archived_at: Optional[datetime] = None
+
+
+class TkTicketTag(SQLModel, table=True):
+    __tablename__ = "tk_ticket_tags"
+
+    ticket_id: Optional[int] = Field(
+        default=None, foreign_key="tk_tickets.id", primary_key=True
+    )
+    tag_id: Optional[int] = Field(
+        default=None, foreign_key="tk_tags.id", primary_key=True
+    )
+
+
+class TkEvent(SQLModel, table=True):
+    """Journal d'un ticket : creation, changement de statut, d'assigne, d'etiquettes."""
+
+    __tablename__ = "tk_events"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticket_id: int = Field(foreign_key="tk_tickets.id", index=True)
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    kind: str
+    payload: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+class TkComment(SQLModel, table=True):
+    __tablename__ = "tk_comments"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticket_id: int = Field(foreign_key="tk_tickets.id", index=True)
+    author_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    body: str
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+
 class CRAEntry(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     date: date
@@ -349,6 +428,42 @@ class ReopenPeriod(BaseModel):
 class CopyWeek(BaseModel):
     target_week_start: date
     user_id: Optional[int] = None
+
+
+class TicketCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    status: str = "todo"
+    priority: str = "medium"
+    assignee_id: Optional[int] = None
+    due_date: Optional[date] = None
+    tag_ids: List[int] = []
+
+
+class TicketUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    priority: Optional[str] = None
+    assignee_id: Optional[int] = None
+    due_date: Optional[date] = None
+    tag_ids: Optional[List[int]] = None
+
+
+class TicketMove(BaseModel):
+    status: str
+    before_id: Optional[int] = None  # carte qui precede, dans la colonne visee
+    after_id: Optional[int] = None
+
+
+class CommentCreate(BaseModel):
+    body: str
+
+
+class TagCreateUpdate(BaseModel):
+    name: str
+    color: Optional[str] = None
+    mission_id: Optional[int] = None
+    archived: bool = False
 
 
 class AssignmentUpdate(BaseModel):
@@ -795,6 +910,16 @@ def create_leave(
                 ),
             )
 
+    # Une periode cloturee est arretee : y poser une absence deplacerait un
+    # decompte deja valide. La regle vient du §6 de SPEC-CRA.md.
+    periodes = {period_of(req.start_date), period_of(req.end_date)}
+    for periode in sorted(periodes):
+        if periode_verrouillee(session, cible, periode):
+            raise HTTPException(
+                status_code=409,
+                detail=f"La periode {periode} est cloturee. Un administrateur doit la rouvrir.",
+            )
+
     feries = charger_feries(session, req.start_date, req.end_date)
     try:
         jours = count_leave_days(
@@ -1000,6 +1125,403 @@ def read_team_calendar(
         }
         for d in demandes
     ]
+
+
+# --- Tickets --------------------------------------------------------------
+
+
+def verifier_valeur(valeur: str, admises: tuple[str, ...], quoi: str) -> None:
+    if valeur not in admises:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{quoi} invalide. Valeurs admises : {', '.join(admises)}",
+        )
+
+
+def journaliser(
+    session: Session, ticket_id: int, user_id: Optional[int], kind: str, payload: str = None
+) -> None:
+    session.add(
+        TkEvent(ticket_id=ticket_id, user_id=user_id, kind=kind, payload=payload)
+    )
+
+
+def etiquettes_du_ticket(session: Session, ticket_id: int) -> List[int]:
+    liens = session.exec(
+        select(TkTicketTag).where(TkTicketTag.ticket_id == ticket_id)
+    ).all()
+    return [lien.tag_id for lien in liens]
+
+
+def poser_etiquettes(session: Session, ticket_id: int, tag_ids: List[int]) -> bool:
+    """Aligne les etiquettes du ticket. Renvoie True si quelque chose a change."""
+    voulues = set(tag_ids)
+    liens = session.exec(
+        select(TkTicketTag).where(TkTicketTag.ticket_id == ticket_id)
+    ).all()
+    actuelles = {lien.tag_id for lien in liens}
+    if voulues == actuelles:
+        return False
+
+    for lien in liens:
+        if lien.tag_id not in voulues:
+            session.delete(lien)
+    for tag_id in voulues - actuelles:
+        if session.get(TkTag, tag_id) is None:
+            raise HTTPException(status_code=404, detail=f"Etiquette {tag_id} inconnue")
+        session.add(TkTicketTag(ticket_id=ticket_id, tag_id=tag_id))
+    return True
+
+
+def ticket_en_dict(session: Session, ticket: TkTicket) -> dict:
+    # Apres un commit, SQLAlchemy expire les attributs de l'instance et
+    # model_dump() ne renvoie plus rien. On recharge avant de serialiser.
+    session.refresh(ticket)
+    return {**ticket.model_dump(), "tag_ids": etiquettes_du_ticket(session, ticket.id)}
+
+
+def position_en_queue(session: Session, statut: str) -> float:
+    """Place une nouvelle carte en bas de sa colonne."""
+    derniere = session.exec(
+        select(TkTicket)
+        .where(TkTicket.status == statut)
+        .order_by(TkTicket.position.desc())
+    ).first()
+    return (derniere.position + GAP) if derniere else GAP
+
+
+@app.get("/tickets/tags")
+def read_tags(
+    include_archived: bool = False,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    requete = select(TkTag)
+    if not include_archived:
+        requete = requete.where(TkTag.archived_at.is_(None))
+    return session.exec(requete.order_by(TkTag.name)).all()
+
+
+@app.post("/tickets/tags", response_model=TkTag)
+def create_tag(
+    req: TagCreateUpdate,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    if session.exec(select(TkTag).where(TkTag.name == req.name)).first():
+        raise HTTPException(status_code=400, detail="Cette etiquette existe deja")
+    tag = TkTag(name=req.name, color=req.color, mission_id=req.mission_id)
+    session.add(tag)
+    session.commit()
+    session.refresh(tag)
+    return tag
+
+
+@app.patch("/tickets/tags/{tag_id}", response_model=TkTag)
+def update_tag(
+    tag_id: int,
+    req: TagCreateUpdate,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Renomme, recolorise ou archive une etiquette. Aucune suppression."""
+    tag = session.get(TkTag, tag_id)
+    if not tag:
+        raise HTTPException(status_code=404, detail="Etiquette introuvable")
+    tag.name = req.name
+    tag.color = req.color
+    tag.mission_id = req.mission_id
+    tag.archived_at = datetime.now() if req.archived else None
+    session.add(tag)
+    session.commit()
+    session.refresh(tag)
+    return tag
+
+
+@app.get("/tickets/board")
+def read_board(
+    assignee_id: Optional[int] = None,
+    tag_id: Optional[int] = None,
+    q: Optional[str] = None,
+    priority: Optional[str] = None,
+    mine: bool = False,
+    done_since_days: int = 30,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Les quatre colonnes, filtrees.
+
+    La colonne `done` est bornee aux `done_since_days` derniers jours : sans
+    cela elle grossit indefiniment et noie les trois autres. Passer 0 leve
+    la borne.
+    """
+    requete = select(TkTicket)
+    if mine:
+        requete = requete.where(TkTicket.assignee_id == current_user.id)
+    elif assignee_id is not None:
+        requete = requete.where(TkTicket.assignee_id == assignee_id)
+    if priority is not None:
+        requete = requete.where(TkTicket.priority == priority)
+    if q:
+        motif = f"%{q}%"
+        requete = requete.where(TkTicket.title.like(motif))
+    if tag_id is not None:
+        ids = [
+            lien.ticket_id
+            for lien in session.exec(
+                select(TkTicketTag).where(TkTicketTag.tag_id == tag_id)
+            ).all()
+        ]
+        requete = requete.where(TkTicket.id.in_(ids or [-1]))
+
+    cartes = session.exec(requete.order_by(TkTicket.position)).all()
+
+    if done_since_days > 0:
+        limite = datetime.now() - timedelta(days=done_since_days)
+        cartes = [
+            c
+            for c in cartes
+            if c.status != "done" or (c.closed_at and c.closed_at >= limite)
+        ]
+
+    colonnes = {statut: [] for statut in TICKET_STATUSES}
+    for carte in cartes:
+        colonnes.setdefault(carte.status, []).append(ticket_en_dict(session, carte))
+    return colonnes
+
+
+@app.get("/tickets/{ticket_id}")
+def read_ticket(
+    ticket_id: int,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    ticket = session.get(TkTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket introuvable")
+
+    commentaires = session.exec(
+        select(TkComment)
+        .where(TkComment.ticket_id == ticket_id)
+        .order_by(TkComment.created_at)
+    ).all()
+    evenements = session.exec(
+        select(TkEvent)
+        .where(TkEvent.ticket_id == ticket_id)
+        .order_by(TkEvent.created_at)
+    ).all()
+
+    return {
+        **ticket_en_dict(session, ticket),
+        "comments": [c.model_dump() for c in commentaires],
+        "events": [e.model_dump() for e in evenements],
+    }
+
+
+@app.post("/tickets")
+def create_ticket(
+    req: TicketCreate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    verifier_valeur(req.status, TICKET_STATUSES, "Statut")
+    verifier_valeur(req.priority, TICKET_PRIORITIES, "Priorite")
+
+    ticket = TkTicket(
+        title=req.title,
+        description=req.description,
+        status=req.status,
+        priority=req.priority,
+        assignee_id=req.assignee_id,
+        reporter_id=current_user.id,
+        due_date=req.due_date,
+        position=position_en_queue(session, req.status),
+        closed_at=datetime.now() if req.status == "done" else None,
+    )
+    session.add(ticket)
+    session.commit()
+    session.refresh(ticket)
+
+    poser_etiquettes(session, ticket.id, req.tag_ids)
+    journaliser(session, ticket.id, current_user.id, "created")
+    session.commit()
+    return ticket_en_dict(session, ticket)
+
+
+@app.patch("/tickets/{ticket_id}")
+def update_ticket(
+    ticket_id: int,
+    req: TicketUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    ticket = session.get(TkTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket introuvable")
+
+    champs = req.model_dump(exclude_unset=True)
+    tag_ids = champs.pop("tag_ids", None)
+    if "priority" in champs and champs["priority"] is not None:
+        verifier_valeur(champs["priority"], TICKET_PRIORITIES, "Priorite")
+
+    if champs.get("assignee_id", ticket.assignee_id) != ticket.assignee_id:
+        journaliser(
+            session,
+            ticket.id,
+            current_user.id,
+            "assignee_changed",
+            str(champs["assignee_id"]),
+        )
+    for champ, valeur in champs.items():
+        setattr(ticket, champ, valeur)
+
+    if tag_ids is not None and poser_etiquettes(session, ticket.id, tag_ids):
+        journaliser(session, ticket.id, current_user.id, "tags_changed")
+
+    if champs:
+        journaliser(session, ticket.id, current_user.id, "updated")
+    ticket.updated_at = datetime.now()
+    session.add(ticket)
+    session.commit()
+    session.refresh(ticket)
+    return ticket_en_dict(session, ticket)
+
+
+@app.post("/tickets/{ticket_id}/move")
+def move_ticket(
+    ticket_id: int,
+    req: TicketMove,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Deplace une carte, entre colonnes ou dans la sienne.
+
+    Toutes les transitions sont permises, retours en arriere compris. Entrer
+    dans `done` horodate la cloture, en sortir l'efface.
+    """
+    ticket = session.get(TkTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket introuvable")
+    verifier_valeur(req.status, TICKET_STATUSES, "Statut")
+
+    # Les identifiants recus sont des reperes, pas des positions. On relit la
+    # colonne pour trouver la voisine reellement adjacente : sinon deux depots
+    # successifs au meme endroit calculent deux fois la meme moyenne, et deux
+    # cartes se retrouvent a la meme position.
+    colonne = [
+        c
+        for c in session.exec(
+            select(TkTicket)
+            .where(TkTicket.status == req.status)
+            .order_by(TkTicket.position)
+        ).all()
+        if c.id != ticket.id
+    ]
+    reperes = {c.id: i for i, c in enumerate(colonne)}
+
+    for repere_id, nom in ((req.before_id, "before_id"), (req.after_id, "after_id")):
+        if repere_id is not None and repere_id not in reperes:
+            raise HTTPException(
+                status_code=422,
+                detail=f"La carte designee par {nom} n'est pas dans la colonne {req.status}",
+            )
+
+    # Si les deux reperes sont donnes et ne sont plus adjacents, `after_id`
+    # l'emporte : la carte se glisse juste avant lui.
+    if req.after_id is not None:
+        i = reperes[req.after_id]
+        avant = colonne[i - 1].position if i > 0 else None
+        apres = colonne[i].position
+    elif req.before_id is not None:
+        i = reperes[req.before_id]
+        avant = colonne[i].position
+        apres = colonne[i + 1].position if i + 1 < len(colonne) else None
+    else:
+        # Aucun repere : la carte va en bas de la colonne visee.
+        avant = colonne[-1].position if colonne else None
+        apres = None
+
+    if needs_rebalance(avant, apres):
+        for carte, position in zip(colonne, rebalance(len(colonne))):
+            carte.position = position
+            session.add(carte)
+        session.flush()
+        logger.info("Colonne %s reequilibree (%s cartes)", req.status, len(colonne))
+        if req.after_id is not None:
+            i = reperes[req.after_id]
+            avant = colonne[i - 1].position if i > 0 else None
+            apres = colonne[i].position
+        else:
+            i = reperes[req.before_id]
+            avant = colonne[i].position
+            apres = colonne[i + 1].position if i + 1 < len(colonne) else None
+
+    nouvelle = position_between(avant, apres)
+
+    ancien_statut = ticket.status
+    ticket.status = req.status
+    ticket.position = nouvelle
+    ticket.updated_at = datetime.now()
+    if req.status == "done" and ancien_statut != "done":
+        ticket.closed_at = datetime.now()
+    elif req.status != "done":
+        ticket.closed_at = None
+
+    if ancien_statut != req.status:
+        journaliser(
+            session,
+            ticket.id,
+            current_user.id,
+            "status_changed",
+            f"{ancien_statut} -> {req.status}",
+        )
+    session.add(ticket)
+    session.commit()
+    session.refresh(ticket)
+    return ticket_en_dict(session, ticket)
+
+
+@app.delete("/tickets/{ticket_id}")
+def delete_ticket(
+    ticket_id: int,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+):
+    ticket = session.get(TkTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket introuvable")
+
+    for modele, colonne in (
+        (TkTicketTag, TkTicketTag.ticket_id),
+        (TkEvent, TkEvent.ticket_id),
+        (TkComment, TkComment.ticket_id),
+    ):
+        for ligne in session.exec(select(modele).where(colonne == ticket_id)).all():
+            session.delete(ligne)
+    session.delete(ticket)
+    session.commit()
+    return {"status": "ok"}
+
+
+@app.post("/tickets/{ticket_id}/comments")
+def create_comment(
+    ticket_id: int,
+    req: CommentCreate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    if not session.get(TkTicket, ticket_id):
+        raise HTTPException(status_code=404, detail="Ticket introuvable")
+    if not req.body.strip():
+        raise HTTPException(status_code=422, detail="Un commentaire vide n'apporte rien")
+
+    commentaire = TkComment(
+        ticket_id=ticket_id, author_id=current_user.id, body=req.body.strip()
+    )
+    session.add(commentaire)
+    session.commit()
+    session.refresh(commentaire)
+    return commentaire.model_dump()
 
 
 # --- Saisie des temps -----------------------------------------------------

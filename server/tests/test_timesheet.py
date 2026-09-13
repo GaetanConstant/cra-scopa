@@ -567,3 +567,27 @@ def test_copie_de_semaine_refusee_sur_periode_cloturee(
         headers=entetes_admin,
     )
     assert reponse.status_code == 409
+
+
+def test_demande_de_conge_refusee_sur_periode_cloturee(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    cp_id: int,
+    admin_id: int,
+) -> None:
+    """§6 — une période clôturée est arrêtée, on n'y pose plus d'absence."""
+    projet = _projet(client, entetes_admin)
+    _remplir_le_mois(client, entetes_admin, admin_id, projet["id"])
+    client.post("/time/close", json={"period": "2026-06"}, headers=entetes_admin)
+
+    reponse = client.post(
+        "/leaves",
+        json={
+            "leave_type_id": cp_id,
+            "start_date": "2026-06-15",
+            "end_date": "2026-06-16",
+        },
+        headers=entetes_admin,
+    )
+    assert reponse.status_code == 409
+    assert "cloturee" in reponse.json()["detail"]

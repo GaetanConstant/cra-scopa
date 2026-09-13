@@ -29,6 +29,11 @@ from main import (  # noqa: E402
     MonthClosure,
     Project,
     PublicHoliday,
+    TkComment,
+    TkEvent,
+    TkTag,
+    TkTicket,
+    TkTicketTag,
     User,
     UserProjectLink,
     app,
@@ -45,6 +50,11 @@ def base_vierge() -> Iterator[None]:
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         modeles = (
+            TkComment,
+            TkEvent,
+            TkTicketTag,
+            TkTicket,
+            TkTag,
             CRAEntry,
             UserProjectLink,
             LeaveRequest,
