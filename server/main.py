@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 from sqlmodel import Field, Relationship, SQLModel, create_engine, Session, select
@@ -11,7 +11,15 @@ from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 from holidays import holidays_for_range
-from leaves import LeaveError, count_leave_days, overlaps
+from leaves import LeaveError, count_leave_days, daily_load, overlaps
+from timesheet import (
+    TimesheetError,
+    check_capacity,
+    check_quantities,
+    missing_working_days,
+    period_bounds,
+    period_of,
+)
 from auth import (
     bearer_scheme,
     create_access_token,
@@ -239,6 +247,20 @@ class LeaveBalance(SQLModel, table=True):
     adjustment: float = 0.0  # reprise d'anteriorite, correction admin
 
 
+class MonthClosure(SQLModel, table=True):
+    """Cloture d'un mois pour un utilisateur.
+
+    Une ligne presente en statut `closed` verrouille la periode : plus aucune
+    ecriture, meme par un administrateur, tant qu'elle n'est pas rouverte.
+    """
+
+    user_id: int = Field(foreign_key="user.id", primary_key=True)
+    period: str = Field(primary_key=True)  # AAAA-MM
+    status: str = "closed"
+    closed_at: Optional[datetime] = None
+    closed_by: Optional[int] = Field(default=None, foreign_key="user.id")
+
+
 class CRAEntry(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     date: date
@@ -312,6 +334,21 @@ class BalanceUpdate(BaseModel):
     leave_type_id: int
     acquired: float = 0.0
     adjustment: float = 0.0
+
+
+class ClosePeriod(BaseModel):
+    period: str
+    user_id: Optional[int] = None  # admin : cloturer pour un autre
+
+
+class ReopenPeriod(BaseModel):
+    period: str
+    user_id: int
+
+
+class CopyWeek(BaseModel):
+    target_week_start: date
+    user_id: Optional[int] = None
 
 
 class AssignmentUpdate(BaseModel):
@@ -965,6 +1002,298 @@ def read_team_calendar(
     ]
 
 
+# --- Saisie des temps -----------------------------------------------------
+
+
+def charge_absences(session: Session, user_id: int, debut: date, fin: date) -> dict[date, float]:
+    """Charge journaliere posee par les absences approuvees de la periode."""
+    demandes = session.exec(
+        select(LeaveRequest).where(
+            LeaveRequest.user_id == user_id,
+            LeaveRequest.status == "approved",
+            LeaveRequest.end_date >= debut,
+            LeaveRequest.start_date <= fin,
+        )
+    ).all()
+
+    charge: dict[date, float] = {}
+    for d in demandes:
+        feries = charger_feries(session, d.start_date, d.end_date)
+        for jour, valeur in daily_load(
+            d.start_date, d.end_date, feries, d.start_half, d.end_half
+        ).items():
+            if debut <= jour <= fin:
+                charge[jour] = charge.get(jour, 0.0) + valeur
+    return charge
+
+
+def periode_verrouillee(session: Session, user_id: int, period: str) -> bool:
+    cloture = session.get(MonthClosure, (user_id, period))
+    return cloture is not None and cloture.status == "closed"
+
+
+def projets_autorises(session: Session, user_id: int) -> dict[int, UserProjectLink]:
+    liens = session.exec(
+        select(UserProjectLink).where(UserProjectLink.user_id == user_id)
+    ).all()
+    return {lien.project_id: lien for lien in liens}
+
+
+def verifier_affectations(
+    session: Session, user_id: int, lignes: List["CRAEntry"]
+) -> None:
+    """Un consultant n'impute que sur ses missions, dans leur fenetre."""
+    autorises = projets_autorises(session, user_id)
+    for ligne in lignes:
+        if ligne.project_id is None:
+            continue  # absence, ferie, activite sans projet
+        lien = autorises.get(ligne.project_id)
+        if lien is None:
+            projet = session.get(Project, ligne.project_id)
+            nom = projet.name if projet else ligne.project_id
+            raise TimesheetError(f"Vous n'etes pas affecte au projet {nom}")
+        if lien.start_date and ligne.date < lien.start_date:
+            raise TimesheetError(
+                f"Le {ligne.date} precede le debut de votre affectation "
+                f"({lien.start_date})"
+            )
+        if lien.end_date and ligne.date > lien.end_date:
+            raise TimesheetError(
+                f"Le {ligne.date} depasse la fin de votre affectation "
+                f"({lien.end_date})"
+            )
+
+
+@app.get("/time")
+def read_timesheet(
+    period: str,
+    user_id: Optional[int] = None,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Vue complete d'un mois : saisies, absences, feries, etat de cloture.
+
+    Un seul aller-retour la ou l'ecran devait croiser quatre sources.
+    """
+    try:
+        debut, fin = period_bounds(period)
+    except TimesheetError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    cible = user_id if user_id is not None else current_user.id
+
+    lignes = session.exec(
+        select(CRAEntry).where(
+            CRAEntry.user_id == cible,
+            CRAEntry.date >= debut,
+            CRAEntry.date <= fin,
+        )
+    ).all()
+    feries = charger_feries(session, debut, fin)
+    absences = charge_absences(session, cible, debut, fin)
+    cloture = session.get(MonthClosure, (cible, period))
+
+    return {
+        "period": period,
+        "user_id": cible,
+        "entries": [l.model_dump() for l in lignes],
+        "leave_load": {str(j): v for j, v in sorted(absences.items())},
+        "holidays": sorted(str(j) for j in feries),
+        "closed": cloture is not None and cloture.status == "closed",
+        "closed_at": cloture.closed_at if cloture else None,
+        "missing_days": [
+            str(j)
+            for j in missing_working_days(
+                period, [(l.date, l.duration_factor) for l in lignes], absences, feries
+            )
+        ],
+    }
+
+
+@app.post("/time/close")
+def close_period(
+    req: ClosePeriod,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Cloture un mois. Refuse tant qu'il reste un jour ouvre non couvert."""
+    cible = current_user.id
+    if req.user_id is not None and req.user_id != current_user.id:
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cloture possible uniquement sur son propre CRA",
+            )
+        cible = req.user_id
+
+    try:
+        debut, fin = period_bounds(req.period)
+    except TimesheetError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if periode_verrouillee(session, cible, req.period):
+        raise HTTPException(status_code=409, detail="Cette periode est deja cloturee")
+
+    lignes = session.exec(
+        select(CRAEntry).where(
+            CRAEntry.user_id == cible, CRAEntry.date >= debut, CRAEntry.date <= fin
+        )
+    ).all()
+    feries = charger_feries(session, debut, fin)
+    absences = charge_absences(session, cible, debut, fin)
+    trous = missing_working_days(
+        req.period, [(l.date, l.duration_factor) for l in lignes], absences, feries
+    )
+    if trous:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Des jours ouvres ne sont ni saisis ni couverts par une absence",
+                "missing_days": [str(j) for j in trous],
+            },
+        )
+
+    cloture = session.get(MonthClosure, (cible, req.period))
+    if cloture is None:
+        cloture = MonthClosure(user_id=cible, period=req.period)
+    cloture.status = "closed"
+    cloture.closed_at = datetime.now()
+    cloture.closed_by = current_user.id
+    session.add(cloture)
+    session.commit()
+    return {"status": "closed", "period": req.period, "user_id": cible}
+
+
+@app.post("/time/reopen")
+def reopen_period(
+    req: ReopenPeriod,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_admin),
+):
+    """Rouvre une periode. Reserve a l'administration, et journalise."""
+    cloture = session.get(MonthClosure, (req.user_id, req.period))
+    if cloture is None or cloture.status != "closed":
+        raise HTTPException(status_code=409, detail="Cette periode n'est pas cloturee")
+
+    cloture.status = "open"
+    cloture.closed_at = None
+    cloture.closed_by = None
+    session.add(cloture)
+    session.commit()
+    logger.warning(
+        "Periode %s rouverte pour l'utilisateur %s par %s",
+        req.period,
+        req.user_id,
+        admin.username,
+    )
+    return {"status": "open", "period": req.period, "user_id": req.user_id}
+
+
+@app.post("/time/copy-week")
+def copy_week(
+    req: CopyWeek,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Recopie les 5 jours ouvres de la semaine precedente.
+
+    Les jours couverts par une absence et les missions terminees sont
+    ignores : recopier un conge ou une mission close ne produirait que des
+    lignes a corriger ensuite.
+    """
+    cible = current_user.id
+    if req.user_id is not None and req.user_id != current_user.id:
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Copie possible uniquement sur son propre CRA",
+            )
+        cible = req.user_id
+
+    debut_cible = req.target_week_start - timedelta(days=req.target_week_start.weekday())
+    debut_source = debut_cible - timedelta(days=7)
+    fin_source = debut_source + timedelta(days=4)
+    fin_cible = debut_cible + timedelta(days=4)
+
+    periodes = {period_of(debut_cible), period_of(fin_cible)}
+    for periode in periodes:
+        if periode_verrouillee(session, cible, periode):
+            raise HTTPException(
+                status_code=409, detail=f"La periode {periode} est cloturee"
+            )
+
+    source = session.exec(
+        select(CRAEntry).where(
+            CRAEntry.user_id == cible,
+            CRAEntry.date >= debut_source,
+            CRAEntry.date <= fin_source,
+        )
+    ).all()
+    if not source:
+        return {"created": 0, "skipped": 0}
+
+    feries = charger_feries(session, debut_cible, fin_cible)
+    absences = charge_absences(session, cible, debut_cible, fin_cible)
+    deja = {
+        (l.date, l.project_id, l.activity_type)
+        for l in session.exec(
+            select(CRAEntry).where(
+                CRAEntry.user_id == cible,
+                CRAEntry.date >= debut_cible,
+                CRAEntry.date <= fin_cible,
+            )
+        ).all()
+    }
+    charge_existante = {}
+    for l in session.exec(
+        select(CRAEntry).where(
+            CRAEntry.user_id == cible,
+            CRAEntry.date >= debut_cible,
+            CRAEntry.date <= fin_cible,
+        )
+    ).all():
+        charge_existante[l.date] = charge_existante.get(l.date, 0.0) + l.duration_factor
+
+    projets = {p.id: p for p in session.exec(select(Project)).all()}
+    crees = ignores = 0
+
+    for ligne in source:
+        cible_jour = ligne.date + timedelta(days=7)
+        if cible_jour in feries or cible_jour.weekday() >= 5:
+            ignores += 1
+            continue
+        if absences.get(cible_jour):
+            ignores += 1
+            continue
+        projet = projets.get(ligne.project_id) if ligne.project_id else None
+        if projet and projet.end_date and projet.end_date < cible_jour:
+            ignores += 1
+            continue
+        if (cible_jour, ligne.project_id, ligne.activity_type) in deja:
+            ignores += 1
+            continue
+
+        occupe = charge_existante.get(cible_jour, 0.0) + absences.get(cible_jour, 0.0)
+        if round(occupe + ligne.duration_factor, 2) > 1.0:
+            ignores += 1
+            continue
+
+        session.add(
+            CRAEntry(
+                date=cible_jour,
+                duration_factor=ligne.duration_factor,
+                activity_type=ligne.activity_type,
+                user_id=cible,
+                project_id=ligne.project_id,
+            )
+        )
+        charge_existante[cible_jour] = occupe + ligne.duration_factor
+        crees += 1
+
+    session.commit()
+    return {"created": crees, "skipped": ignores}
+
+
 @app.post("/cra/batch")
 def create_cra_batch(
     entries: List[CRAEntry],
@@ -987,6 +1316,37 @@ def create_cra_batch(
     user_id = entries[0].user_id
     year = entries[0].date.year
     month = entries[0].date.month
+    periode = f"{year:04d}-{month:02d}"
+
+    # L'enregistrement remplace le mois entier : toutes les lignes doivent
+    # donc appartenir au meme mois et au meme utilisateur, sans quoi la
+    # suppression ci-dessous effacerait des donnees qui ne sont pas remplacees.
+    if any(e.user_id != user_id for e in entries):
+        raise HTTPException(
+            status_code=422, detail="Toutes les lignes doivent viser le meme utilisateur"
+        )
+    if any((e.date.year, e.date.month) != (year, month) for e in entries):
+        raise HTTPException(
+            status_code=422, detail="Toutes les lignes doivent appartenir au meme mois"
+        )
+
+    # Une periode cloturee est verrouillee pour tout le monde, administrateur
+    # compris : la rouvrir est un acte explicite et journalise.
+    if periode_verrouillee(session, user_id, periode):
+        raise HTTPException(
+            status_code=409,
+            detail=f"La periode {periode} est cloturee. Un administrateur doit la rouvrir.",
+        )
+
+    debut, fin = period_bounds(periode)
+    lignes = [(e.date, e.duration_factor) for e in entries]
+    try:
+        check_quantities(lignes)
+        check_capacity(lignes, charge_absences(session, user_id, debut, fin))
+        if not current_user.is_admin:
+            verifier_affectations(session, user_id, entries)
+    except TimesheetError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Supprimer toutes les entrées existantes du mois pour cet utilisateur
     existing_entries = session.exec(

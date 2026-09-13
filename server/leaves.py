@@ -86,3 +86,32 @@ def overlaps(
     la main plutôt que par une règle que personne ne saurait relire.
     """
     return start_a <= end_b and start_b <= end_a
+
+
+def daily_load(
+    start: date,
+    end: date,
+    holidays: Iterable[date],
+    start_half: Optional[str] = None,
+    end_half: Optional[str] = None,
+) -> dict[date, float]:
+    """Charge posée par une absence, jour par jour.
+
+    Le CRA raisonne à la journée : il lui faut savoir qu'un mardi est pris à
+    0,5 et non seulement que la demande vaut 3,5 jours au total.
+    """
+    ouvres = working_days(start, end, holidays)
+    if not ouvres:
+        return {}
+
+    if start == end:
+        return {ouvres[0]: count_leave_days(start, end, holidays, start_half, end_half)}
+
+    debut = start_half or "am"
+    fin = end_half or "pm"
+    charge = {jour: 1.0 for jour in ouvres}
+    if debut == "pm" and start in charge:
+        charge[start] = 0.5
+    if fin == "am" and end in charge:
+        charge[end] = 0.5
+    return charge
