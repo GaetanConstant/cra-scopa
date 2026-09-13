@@ -388,9 +388,9 @@ function App() {
             <button onClick={() => setCurrentView('cra')} className={`transition-all whitespace-nowrap ${currentView === 'cra' ? 'text-primary' : 'opacity-30'}`}>Mon CRA</button>
             <button onClick={() => setCurrentView('conges')} className={`transition-all whitespace-nowrap ${currentView === 'conges' ? 'text-primary' : 'opacity-30'}`}>Congés</button>
             <button onClick={() => setCurrentView('tickets')} className={`transition-all whitespace-nowrap ${currentView === 'tickets' ? 'text-primary' : 'opacity-30'}`}>Tickets</button>
-            <button onClick={() => setCurrentView('activite')} className={`transition-all whitespace-nowrap ${currentView === 'activite' ? 'text-primary' : 'opacity-30'}`}>Activité</button>
             {currentUser.is_admin && (
               <>
+                <button onClick={() => setCurrentView('activite')} className={`transition-all whitespace-nowrap ${currentView === 'activite' ? 'text-primary' : 'opacity-30'}`}>Activité</button>
                 <button onClick={() => setCurrentView('projects')} className={`transition-all whitespace-nowrap ${currentView === 'projects' ? 'text-primary' : 'opacity-30'}`}>Projets</button>
                 <button onClick={() => setCurrentView('admin_cra')} className={`transition-all whitespace-nowrap ${currentView === 'admin_cra' ? 'text-primary' : 'opacity-30'}`}>Revues CRA</button>
                 <button onClick={() => setCurrentView('admin_global')} className={`transition-all whitespace-nowrap ${currentView === 'admin_global' ? 'text-primary' : 'opacity-30'}`}>Bilan Global</button>
@@ -1277,7 +1277,7 @@ function App() {
       {currentUser && currentView === 'cra' && renderSpreadsheet()}
       {currentUser && currentView === 'conges' && <Conges currentUser={currentUser} />}
       {currentUser && currentView === 'tickets' && <Tickets currentUser={currentUser} />}
-      {currentUser && currentView === 'activite' && <Activite />}
+      {currentUser && currentUser.is_admin && currentView === 'activite' && <Activite />}
       {currentUser && currentView === 'projects' && renderProjectsView()}
       {currentUser && currentView === 'admin_cra' && renderAdminCRAView()}
       {currentUser && currentView === 'admin_global' && renderAdminGlobalView()}

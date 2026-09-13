@@ -541,6 +541,23 @@ def on_startup():
     # conteneur et par run_dev.sh — pas par l'application elle-meme.
     logger.info("Demarrage de l'API CRA")
 
+def cible_autorisee(current_user: "User", user_id: Optional[int]) -> int:
+    """Utilisateur dont on a le droit de lire le dossier.
+
+    Un consultant ne lit que le sien ; l'administration lit celui de tous.
+    Sans ce garde-fou, masquer un onglet dans la navbar ne protege rien :
+    l'API repond a qui l'appelle directement.
+    """
+    if user_id is None or user_id == current_user.id:
+        return current_user.id
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Consultation limitee a votre propre dossier",
+        )
+    return user_id
+
+
 def verifier_statut(statut: str) -> None:
     """Le statut pilote le previsionnel : une valeur libre le fausserait."""
     if statut not in PROJECT_STATUSES:
@@ -898,12 +915,20 @@ def read_leaves(
     to_date: Optional[date] = None,
     status: Optional[str] = None,
     session: Session = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """Demandes filtrees. Lecture ouverte a toute l'equipe (SPEC §4)."""
+    """Demandes filtrees.
+
+    Un consultant ne voit que les siennes. Le calendrier d'equipe, lui,
+    reste ouvert a tous : savoir qui est absent quand est necessaire pour
+    s'organiser, le detail des motifs ne l'est pas.
+    """
     requete = select(LeaveRequest)
-    if user_id is not None:
-        requete = requete.where(LeaveRequest.user_id == user_id)
+    if current_user.is_admin:
+        if user_id is not None:
+            requete = requete.where(LeaveRequest.user_id == user_id)
+    else:
+        requete = requete.where(LeaveRequest.user_id == current_user.id)
     if from_date is not None:
         requete = requete.where(LeaveRequest.end_date >= from_date)
     if to_date is not None:
@@ -1068,7 +1093,7 @@ def read_balances(
     year: Optional[int] = None,
     user_id: Optional[int] = None,
     session: Session = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Soldes par utilisateur et par type.
 
@@ -1080,8 +1105,11 @@ def read_balances(
     debut, fin = date(annee, 1, 1), date(annee, 12, 31)
 
     requete = select(LeaveBalance).where(LeaveBalance.year == annee)
-    if user_id is not None:
-        requete = requete.where(LeaveBalance.user_id == user_id)
+    if current_user.is_admin:
+        if user_id is not None:
+            requete = requete.where(LeaveBalance.user_id == user_id)
+    else:
+        requete = requete.where(LeaveBalance.user_id == current_user.id)
     soldes = session.exec(requete).all()
 
     demandes = session.exec(
@@ -1426,7 +1454,7 @@ def read_activity(
     from_date: date,
     to_date: date,
     session: Session = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    _admin: User = Depends(require_admin),
 ):
     """Jours ouvres, absences, jours saisis et taux d'occupation par consultant."""
     if to_date < from_date:
@@ -1445,7 +1473,7 @@ def export_activity(
     from_date: date,
     to_date: date,
     session: Session = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    _admin: User = Depends(require_admin),
 ):
     """Le meme tableau en CSV, separateur point-virgule."""
     if to_date < from_date:
@@ -1957,7 +1985,7 @@ def read_timesheet(
     except TimesheetError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    cible = user_id if user_id is not None else current_user.id
+    cible = cible_autorisee(current_user, user_id)
 
     lignes = session.exec(
         select(CRAEntry).where(
@@ -2241,7 +2269,7 @@ def read_all_cra(
     year: int,
     month: int,
     session: Session = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    _admin: User = Depends(require_admin),
 ):
     entries = session.exec(
         select(CRAEntry).where(
@@ -2256,8 +2284,9 @@ def read_user_cra(
     year: int,
     month: int,
     session: Session = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    user_id = cible_autorisee(current_user, user_id)
     entries = session.exec(
         select(CRAEntry).where(
             CRAEntry.user_id == user_id,
