@@ -8,7 +8,8 @@ import {
 import { fr } from 'date-fns/locale'
 import {
   ChevronLeft, ChevronRight, Briefcase, Calendar, Info, Plus,
-  Trash2, Save, AlertCircle, CheckCircle2, Loader2, User, LogOut, Lock, Key, Settings, Eye, Users, Layout, BarChart3
+  Trash2, Save, AlertCircle, CheckCircle2, Loader2, User, LogOut, Lock, Key, Settings, Eye, EyeOff, Users, Layout, BarChart3,
+  Moon, Sun
 } from 'lucide-react'
 
 const API_BASE = window.location.host.includes(':3300')
@@ -67,6 +68,8 @@ function App() {
 
   // Forms
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
+  const [showPassword, setShowPassword] = useState(false)
+  const [theme, setTheme] = useState(() => localStorage.getItem('scopa_theme') || 'light')
   const [passForm, setPassForm] = useState({ old: '', new: '', confirm: '' })
   const [projectNameInput, setProjectNameInput] = useState("")
   const [projectCategoryInput, setProjectCategoryInput] = useState("Mission")
@@ -176,6 +179,12 @@ function App() {
       fetchAllCRAData();
     }
   }, [currentView, currentDate]);
+
+  // Le theme se pose sur <html> : les tokens de theme.css basculent d'un bloc.
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('scopa_theme', theme)
+  }, [theme])
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -326,6 +335,13 @@ function App() {
               <p className="text-[10px] font-black uppercase leading-none">{currentUser.full_name}</p>
               <User size={14} />
             </div>
+            <button
+              onClick={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+              aria-label={theme === 'dark' ? 'Passer en thème clair' : 'Passer en thème sombre'}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
+            >
+              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
             <button onClick={handleLogout} className="text-gray-300 hover:text-red-500"><LogOut size={16} /></button>
           </div>
         </div>
@@ -333,28 +349,92 @@ function App() {
     </header>
   );
 
+  // Reprise de la mise en page du login Plouf (plouf_front/src/pages/Login.jsx) :
+  // illustration du perroquet en fond, panneau flou a gauche, carte de connexion.
+  // La mecanique d'authentification est inchangee : meme handleLogin, meme endpoint.
   const renderLogin = () => (
-    <main className="min-h-[80vh] flex items-center justify-center p-8">
-      <div className="bg-white rounded-[50px] p-16 w-full max-w-lg shadow-2xl border-2 border-black animate-in fade-in zoom-in duration-500">
-        <div className="text-center mb-12">
-          <div className="bg-[#6186EA] w-20 h-20 rounded-3x flex items-center justify-center -rotate-3 mx-auto mb-6 shadow-xl"><span className="text-white font-black text-4xl">S</span></div>
-          <h2 className="text-4xl font-black uppercase tracking-tighter">Connexion Artisan</h2>
+    <main className="login-page">
+      <section className="login-panel">
+        <div className="login-card">
+          <div style={{ marginBottom: '2rem', textAlign: 'center' }}>
+            <img
+              src="/logo/scopa.png"
+              alt="SCOPA"
+              style={{ margin: '0 auto 1rem', height: '56px', objectFit: 'contain', display: 'block' }}
+            />
+            <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.25rem' }}>
+              Connexion
+            </h1>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+              Entrez vos identifiants pour accéder au CRA SCOPA
+            </p>
+          </div>
+
+          {errorMsg && (
+            <div role="alert" className="alert-error" style={{ marginBottom: '1rem' }}>
+              {errorMsg}
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div className="form-group">
+              <label htmlFor="username">
+                Identifiant <span style={{ color: 'var(--danger)' }}>*</span>
+              </label>
+              <input
+                id="username"
+                type="text"
+                className="form-input"
+                value={loginForm.username}
+                onChange={e => setLoginForm({ ...loginForm, username: e.target.value })}
+                required
+                autoComplete="username"
+                placeholder="gconstant"
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="password">
+                Mot de passe <span style={{ color: 'var(--danger)' }}>*</span>
+              </label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="form-input"
+                  style={{ paddingRight: '3rem' }}
+                  value={loginForm.password}
+                  onChange={e => setLoginForm({ ...loginForm, password: e.target.value })}
+                  required
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                  onClick={() => setShowPassword(v => !v)}
+                  style={{
+                    position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)',
+                    background: 'transparent', border: 'none', cursor: 'pointer', padding: '0.25rem',
+                    color: 'var(--text-muted)', display: 'flex', alignItems: 'center',
+                  }}
+                >
+                  {showPassword ? <Eye size={18} /> : <EyeOff size={18} />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={loading}
+              style={{ marginTop: '0.5rem', width: '100%', borderRadius: '9999px' }}
+            >
+              {loading ? 'Connexion…' : 'Se connecter'}
+            </button>
+          </form>
         </div>
-        <form onSubmit={handleLogin} className="space-y-6">
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest ml-4">Identifiant</label>
-            <input type="text" value={loginForm.username} onChange={e => setLoginForm({ ...loginForm, username: e.target.value })} placeholder="gconstant" className="w-full bg-gray-50 border-2 border-transparent focus:border-[#6186EA] p-6 rounded-3xl outline-none font-black text-sm transition-all" />
-          </div>
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest ml-4">Mot de passe</label>
-            <input type="password" value={loginForm.password} onChange={e => setLoginForm({ ...loginForm, password: e.target.value })} placeholder="••••••••" className="w-full bg-gray-50 border-2 border-transparent focus:border-[#6186EA] p-6 rounded-3xl outline-none font-black text-sm transition-all" />
-          </div>
-          {errorMsg && <p className="text-red-500 text-[10px] font-black uppercase text-center">{errorMsg}</p>}
-          <button type="submit" disabled={loading} className="w-full bg-black text-white p-7 rounded-[30px] font-black uppercase tracking-widest text-sm hover:translate-y-[-2px] hover:shadow-2xl transition-all disabled:opacity-50">
-            {loading ? <Loader2 className="animate-spin mx-auto" size={24} /> : "Se connecter"}
-          </button>
-        </form>
-      </div>
+      </section>
     </main>
   );
 
@@ -889,10 +969,15 @@ function App() {
     </main>
   );
 
+  // Page pleine : ni en-tete ni navigation tant qu'on n'est pas connecte.
+  if (!currentUser) return renderLogin();
+
   return (
-    <div className="min-h-screen bg-[#EDECEA] text-black font-['Work_Sans',sans-serif]">
+    <div
+      className="min-h-screen"
+      style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-main)', fontFamily: 'var(--font-sans)' }}
+    >
       {renderHeader()}
-      {!currentUser && renderLogin()}
       {currentUser && currentView === 'cra' && renderSpreadsheet()}
       {currentUser && currentView === 'projects' && renderProjectsView()}
       {currentUser && currentView === 'admin_cra' && renderAdminCRAView()}
