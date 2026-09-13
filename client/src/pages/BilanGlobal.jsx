@@ -7,6 +7,15 @@ import { exportActivity, getActivity, messageErreur } from '../api/client'
 
 const iso = (d) => format(d, 'yyyy-MM-dd')
 
+// Natures d'activité affichées en colonnes, reprises de l'ancien bilan global.
+const TYPES = [
+  { id: 'Mission', label: 'Missions', couleur: 'bg-mission' },
+  { id: 'Formation', label: 'Formations', couleur: 'bg-formation' },
+  { id: 'Interne', label: 'Interne', couleur: 'bg-interne' },
+  { id: 'Absence', label: 'Absences', couleur: 'bg-danger' },
+  { id: 'Férié', label: 'Fériés', couleur: 'bg-success' },
+]
+
 /** Périodes proposées : le mois courant, le précédent, l'année en cours. */
 function periodes() {
   const maintenant = new Date()
@@ -44,7 +53,7 @@ function Taux({ valeur }) {
   return <span className={`font-black ${couleur}`}>{pourcent} %</span>
 }
 
-export function Activite() {
+export function BilanGlobal() {
   const options = useMemo(periodes, [])
   const [periode, setPeriode] = useState(options[0])
   const [donnees, setDonnees] = useState(null)
@@ -79,7 +88,7 @@ export function Activite() {
 
   return (
     <main className="p-8 w-full">
-      <h2 className="text-5xl font-black uppercase tracking-tighter mb-6">Activité</h2>
+      <h2 className="text-5xl font-black uppercase tracking-tighter mb-6">Bilan global</h2>
 
       <div className="flex items-center gap-2 flex-wrap mb-8">
         <div className="flex items-center gap-1 bg-input rounded-2xl p-1">
@@ -124,6 +133,12 @@ export function Activite() {
             <thead>
               <tr className="text-[9px] uppercase tracking-widest text-ink-muted text-left border-b-2 border-line">
                 <th className="p-5">Collaborateur</th>
+                {TYPES.map((t) => (
+                  <th key={t.id} className="p-5 text-right">
+                    <span className={`${t.couleur} inline-block w-2 h-2 rounded-full mr-2`} />
+                    {t.label}
+                  </th>
+                ))}
                 <th className="p-5 text-right">Jours ouvrés</th>
                 <th className="p-5 text-right">Absences</th>
                 <th className="p-5 text-right">Disponibles</th>
@@ -140,6 +155,11 @@ export function Activite() {
                     className="border-b border-line cursor-pointer hover:bg-hovered transition-colors"
                   >
                     <td className="p-5 font-black">{l.full_name}</td>
+                    {TYPES.map((t) => (
+                      <td key={t.id} className="p-5 text-right text-ink-muted">
+                        {l.by_activity[t.id] ?? '—'}
+                      </td>
+                    ))}
                     <td className="p-5 text-right text-ink-muted">{l.working_days}</td>
                     <td className="p-5 text-right text-ink-muted">{l.leave_days}</td>
                     <td className="p-5 text-right">{l.available_days}</td>
@@ -158,7 +178,7 @@ export function Activite() {
 
                   {deplie === l.user_id && (
                     <tr className="border-b border-line">
-                      <td colSpan={7} className="px-5 pb-5 bg-input">
+                      <td colSpan={7 + TYPES.length} className="px-5 pb-5 bg-input">
                         {l.by_project.length === 0 ? (
                           <p className="text-sm text-ink-muted pt-4">
                             Aucune saisie sur la période.

@@ -28,6 +28,10 @@ function fenetreEquipe(reference = new Date()) {
 
 export function useConges(currentUser) {
   const annee = new Date().getFullYear()
+  // Le hook est monté au niveau de l'application, donc aussi avant la
+  // connexion. Sans ce garde-fou, ses appels partent sans jeton, l'API
+  // répond 401, l'intercepteur vide la session et recharge : la page boucle.
+  const connecte = Boolean(currentUser?.id)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -40,6 +44,10 @@ export function useConges(currentUser) {
   const [utilisateurs, setUtilisateurs] = useState([])
 
   const charger = useCallback(async () => {
+    if (!connecte) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
@@ -54,7 +62,7 @@ export function useConges(currentUser) {
       ] = await Promise.all([
         getLeaveTypes(),
         getHolidays(annee),
-        getLeaves({ user_id: currentUser.id }),
+        getLeaves({ user_id: currentUser?.id }),
         getBalances(annee),
         getTeamCalendar(debut, fin),
         getUsers(),
@@ -63,18 +71,18 @@ export function useConges(currentUser) {
       setTypes(typesRecus)
       setFeries(feriesRecus.map((f) => f.date))
       setMesDemandes(demandes)
-      setSoldes(soldesRecus.filter((s) => s.user_id === currentUser.id))
+      setSoldes(soldesRecus.filter((s) => s.user_id === currentUser?.id))
       setEquipe(calendrier)
       setUtilisateurs(gens)
 
       // La file d'attente n'a de sens que pour un administrateur.
-      setEnAttente(currentUser.is_admin ? await getLeaves({ status: 'pending' }) : [])
+      setEnAttente(currentUser?.is_admin ? await getLeaves({ status: 'pending' }) : [])
     } catch (err) {
       setError(messageErreur(err, 'Impossible de charger les congés'))
     } finally {
       setLoading(false)
     }
-  }, [annee, currentUser.id, currentUser.is_admin])
+  }, [annee, connecte, currentUser?.id, currentUser?.is_admin])
 
   useEffect(() => {
     charger()

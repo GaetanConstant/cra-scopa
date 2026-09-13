@@ -183,3 +183,84 @@ def test_annuaire_et_referentiel_restent_lisibles(
     assert client.get("/users/", headers=entetes_consultant).status_code == 200
     assert client.get("/projects/", headers=entetes_consultant).status_code == 200
     assert client.get("/tickets/board", headers=entetes_consultant).status_code == 200
+
+
+# --- Tickets ---------------------------------------------------------------
+
+
+def _ticket(client: TestClient, entetes: dict[str, str], **champs) -> dict:
+    reponse = client.post("/tickets", json={"title": "T", **champs}, headers=entetes)
+    assert reponse.status_code == 200, reponse.text
+    return reponse.json()
+
+
+def test_consultant_ne_voit_que_ses_tickets(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    consultant_id: int,
+    admin_id: int,
+) -> None:
+    a_lui = _ticket(client, entetes_admin, title="Assigné au consultant",
+                    assignee_id=consultant_id)
+    ouvert_par_lui = _ticket(client, entetes_consultant, title="Ouvert par lui")
+    _ticket(client, entetes_admin, title="Pour l'admin", assignee_id=admin_id)
+
+    vus = client.get("/tickets/board", headers=entetes_consultant).json()
+    ids = {t["id"] for colonne in vus.values() for t in colonne}
+    assert ids == {a_lui["id"], ouvert_par_lui["id"]}
+
+    tous = client.get("/tickets/board", headers=entetes_admin).json()
+    assert len({t["id"] for c in tous.values() for t in c}) == 3
+
+
+def test_consultant_n_ouvre_pas_le_ticket_d_un_autre(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    admin_id: int,
+) -> None:
+    autre = _ticket(client, entetes_admin, assignee_id=admin_id)
+    assert client.get(f"/tickets/{autre['id']}", headers=entetes_consultant).status_code == 404
+
+
+def test_consultant_ne_modifie_pas_le_ticket_d_un_autre(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    admin_id: int,
+) -> None:
+    autre = _ticket(client, entetes_admin, assignee_id=admin_id)
+    assert (
+        client.patch(
+            f"/tickets/{autre['id']}", json={"title": "détourné"}, headers=entetes_consultant
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            f"/tickets/{autre['id']}/move", json={"status": "done"}, headers=entetes_consultant
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            f"/tickets/{autre['id']}/comments", json={"body": "coucou"},
+            headers=entetes_consultant,
+        ).status_code
+        == 404
+    )
+
+
+def test_consultant_agit_sur_ses_propres_tickets(
+    client: TestClient, entetes_consultant: dict[str, str], consultant_id: int
+) -> None:
+    sien = _ticket(client, entetes_consultant, assignee_id=consultant_id)
+    assert client.get(f"/tickets/{sien['id']}", headers=entetes_consultant).status_code == 200
+    assert (
+        client.post(
+            f"/tickets/{sien['id']}/move", json={"status": "in_progress"},
+            headers=entetes_consultant,
+        ).status_code
+        == 200
+    )

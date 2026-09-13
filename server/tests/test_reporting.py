@@ -218,3 +218,27 @@ def test_colonnes_numeriques_toujours_decimales() -> None:
     assert isinstance(vide["leave_days"], float)
     assert isinstance(vide["missing_days"], float)
     assert to_csv([vide], ("entered_days",)).strip().split("\n")[1] == "0,00"
+
+
+def test_repartition_par_type_d_activite(
+    client: TestClient, entetes_admin: dict[str, str], admin_id: int
+) -> None:
+    """Reprend la lecture de l'ancien bilan global, fusionné dans l'activité."""
+    projet = _projet(client, entetes_admin, "HOMESERVE")
+    lignes = [
+        {"date": "2026-06-01", "duration_factor": 1.0, "activity_type": "Mission",
+         "user_id": admin_id, "project_id": projet},
+        {"date": "2026-06-02", "duration_factor": 0.5, "activity_type": "Formation",
+         "user_id": admin_id, "project_id": projet},
+    ]
+    assert client.post("/cra/batch", json=lignes, headers=entetes_admin).status_code == 200
+
+    ligne = next(
+        l
+        for l in client.get(
+            "/reporting/activity?from_date=2026-06-01&to_date=2026-06-30",
+            headers=entetes_admin,
+        ).json()["rows"]
+        if l["user_id"] == admin_id
+    )
+    assert ligne["by_activity"] == {"Mission": 1.0, "Formation": 0.5}

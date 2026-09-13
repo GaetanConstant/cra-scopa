@@ -10,9 +10,10 @@ import {
   patchPrefs,
   testDigest,
 } from './api/client'
-import { Conges } from './pages/Conges'
+import { BlocConges, DemandeCongeModal } from './pages/Conges'
 import { Tickets } from './pages/Tickets'
-import { Activite } from './pages/Activite'
+import { BilanGlobal } from './pages/BilanGlobal'
+import { useConges } from './hooks/useConges'
 import {
   format, startOfMonth, endOfMonth, eachDayOfInterval,
   isSameMonth, isSameDay, addMonths, subMonths,
@@ -49,7 +50,6 @@ function App() {
 
   // Admin states
   const [selectedReviewUser, setSelectedReviewUser] = useState(null)
-  const [allCRAData, setAllCRAData] = useState([]) // For admin view
 
   // Forms
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
@@ -59,6 +59,7 @@ function App() {
   // Sous 768 px, le tableau mensuel de 1500 px n'est pas manipulable : on
   // affiche une semaine à la fois, avec de gros boutons de demi-journée.
   const [semaineMobile, setSemaineMobile] = useState(0)
+  const [demandeOuverte, setDemandeOuverte] = useState(false)
   const [mailConfig, setMailConfig] = useState(null)
   const [mailStatus, setMailStatus] = useState(null)
   const [passForm, setPassForm] = useState({ old: '', new: '', confirm: '' })
@@ -153,23 +154,8 @@ function App() {
     finally { setLoading(false); }
   };
 
-  const fetchAllCRAData = async () => {
-    if (!currentUser?.is_admin) return;
-    setLoading(true);
-    try {
-      const year = currentDate.getFullYear();
-      const month = currentDate.getMonth() + 1;
-      const res = await axios.get(`${API_BASE}/cra/all/${year}/${month}`);
-      setAllCRAData(res.data);
-    } catch (err) { console.error("Error global CRA", err) }
-    finally { setLoading(false); }
-  };
-
-  useEffect(() => {
-    if (currentView === 'admin_global' && currentUser?.is_admin) {
-      fetchAllCRAData();
-    }
-  }, [currentView, currentDate]);
+  // Congés : chargés avec le CRA, puisqu'ils s'affichent sous le calendrier.
+  const conges = useConges(currentUser ?? { id: 0, is_admin: false })
 
   // Préférences de notification, chargées à l'ouverture de l'onglet profil.
   useEffect(() => {
@@ -386,14 +372,12 @@ function App() {
         <div className="flex flex-col-reverse md:flex-row md:items-center gap-3 md:gap-8 min-w-0">
           <nav className="flex items-center gap-4 md:gap-6 font-black text-xs tracking-widest uppercase overflow-x-auto custom-scrollbar min-w-0">
             <button onClick={() => setCurrentView('cra')} className={`transition-all whitespace-nowrap ${currentView === 'cra' ? 'text-primary' : 'opacity-30'}`}>Mon CRA</button>
-            <button onClick={() => setCurrentView('conges')} className={`transition-all whitespace-nowrap ${currentView === 'conges' ? 'text-primary' : 'opacity-30'}`}>Congés</button>
             <button onClick={() => setCurrentView('tickets')} className={`transition-all whitespace-nowrap ${currentView === 'tickets' ? 'text-primary' : 'opacity-30'}`}>Tickets</button>
             {currentUser.is_admin && (
               <>
-                <button onClick={() => setCurrentView('activite')} className={`transition-all whitespace-nowrap ${currentView === 'activite' ? 'text-primary' : 'opacity-30'}`}>Activité</button>
-                <button onClick={() => setCurrentView('projects')} className={`transition-all whitespace-nowrap ${currentView === 'projects' ? 'text-primary' : 'opacity-30'}`}>Projets</button>
                 <button onClick={() => setCurrentView('admin_cra')} className={`transition-all whitespace-nowrap ${currentView === 'admin_cra' ? 'text-primary' : 'opacity-30'}`}>Revues CRA</button>
                 <button onClick={() => setCurrentView('admin_global')} className={`transition-all whitespace-nowrap ${currentView === 'admin_global' ? 'text-primary' : 'opacity-30'}`}>Bilan Global</button>
+                <button onClick={() => setCurrentView('projects')} className={`transition-all whitespace-nowrap ${currentView === 'projects' ? 'text-primary' : 'opacity-30'}`}>Projets</button>
                 <button onClick={() => setCurrentView('admin_users')} className={`transition-all whitespace-nowrap ${currentView === 'admin_users' ? 'text-primary' : 'opacity-30'}`}>Collaborateurs</button>
               </>
             )}
@@ -674,6 +658,14 @@ function App() {
 
             <button
               type="button"
+              onClick={() => setDemandeOuverte(true)}
+              className="shrink-0 bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] tracking-widest hover:border-primary transition-all"
+            >
+              Demander un congé
+            </button>
+
+            <button
+              type="button"
               onClick={cloturerLeMois}
               disabled={metaBusy || meta?.closed}
               className="shrink-0 bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] tracking-widest hover:border-primary transition-all disabled:opacity-40"
@@ -810,7 +802,15 @@ function App() {
             </tfoot>
           </table>
         </div>
+
+        {/* Les congés vivent sous le calendrier : poser une absence et
+            remplir son CRA sont le même geste. */}
+        <BlocConges conges={conges} currentUser={currentUser} />
       </div>
+
+      {demandeOuverte && (
+        <DemandeCongeModal conges={conges} onFermer={() => setDemandeOuverte(false)} />
+      )}
     </main>
   );
 
@@ -905,99 +905,6 @@ function App() {
           </div>
         </div>
       )}
-    </main>
-  );
-
-  const renderAdminGlobalView = () => (
-    <main className="p-8 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-10">
-        <div>
-          <h2 className="text-5xl font-black uppercase tracking-tighter mb-2">Bilan Global</h2>
-          <p className="text-[10px] font-black text-ink-muted uppercase tracking-widest">Activité consolidée de l'agence</p>
-        </div>
-        <div className="flex items-center bg-card rounded-3xl p-2 border-2 border-line shadow-sm">
-          <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-hovered p-3 rounded-2xl transition-all text-ink"><ChevronLeft size={20} /></button>
-          <span className="px-8 font-black text-sm uppercase tracking-[0.2em] min-w-[200px] text-center">{format(currentDate, 'MMMM yyyy', { locale: fr })}</span>
-          <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="hover:bg-hovered p-3 rounded-2xl transition-all text-ink"><ChevronRight size={20} /></button>
-        </div>
-      </div>
-
-      <div className="bg-card rounded-[40px] shadow-2xl border-2 border-line-strong overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-700">
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="bg-inverse text-on-inverse">
-              <th className="p-8 text-left text-[10px] font-black uppercase tracking-widest">Collaborateur</th>
-              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-formation">Missions</th>
-              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-interne">Formations</th>
-              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-mission">Interne</th>
-              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-danger">Absences</th>
-              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-success">Fériés</th>
-              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-inverse text-on-inverse border-l border-line-inverse">Total Actif</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y-2 divide-line">
-            {allUsers.map(user => {
-              const userEntries = allCRAData.filter(e => e.user_id === user.id);
-              const getSum = (type) => userEntries.filter(e => e.activity_type === type).reduce((s, e) => s + e.duration_factor, 0);
-              
-              const mission = getSum('Mission');
-              const formation = getSum('Formation');
-              const interne = getSum('Interne');
-              const absence = getSum('Absence');
-              const conge = getSum('Férié');
-              const total = mission + formation + interne;
-
-              return (
-                <tr key={user.id} className="hover:bg-input transition-all font-black group">
-                  <td className="p-8">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-2xl bg-hovered flex items-center justify-center text-ink-muted group-hover:bg-inverse group-hover:text-on-inverse transition-all duration-300">
-                        {user.is_admin ? <Lock size={20} className="text-warning" /> : <User size={20} />}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="uppercase text-sm tracking-tight">{user.full_name}</p>
-                          {user.is_admin && <span className="bg-inverse text-on-inverse text-[7px] px-1.5 py-0.5 rounded-full">ADMIN</span>}
-                        </div>
-                        <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest">@{user.username}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="p-8 text-center text-xl tracking-tighter text-formation">{mission.toFixed(1)}</td>
-                  <td className="p-8 text-center text-xl tracking-tighter text-warning">{formation.toFixed(1)}</td>
-                  <td className="p-8 text-center text-xl tracking-tighter text-mission">{interne.toFixed(1)}</td>
-                  <td className="p-8 text-center text-xl tracking-tighter text-danger">{absence.toFixed(1)}</td>
-                  <td className="p-8 text-center text-xl tracking-tighter text-success">{conge.toFixed(1)}</td>
-                  <td className="p-8 text-center text-xl tracking-tighter bg-input border-l border-line">{total.toFixed(1)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-          <tfoot>
-            <tr className="bg-input font-black border-t-4 border-line-strong">
-              <td className="p-8 uppercase text-[10px] tracking-widest">Total Agence</td>
-              <td className="p-8 text-center text-2xl tracking-tighter">
-                {allCRAData.filter(e => e.activity_type === 'Mission').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
-              </td>
-              <td className="p-8 text-center text-2xl tracking-tighter">
-                {allCRAData.filter(e => e.activity_type === 'Formation').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
-              </td>
-              <td className="p-8 text-center text-2xl tracking-tighter">
-                {allCRAData.filter(e => e.activity_type === 'Interne').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
-              </td>
-              <td className="p-8 text-center text-2xl tracking-tighter">
-                {allCRAData.filter(e => e.activity_type === 'Absence').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
-              </td>
-              <td className="p-8 text-center text-2xl tracking-tighter">
-                {allCRAData.filter(e => e.activity_type === 'Férié').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
-              </td>
-              <td className="p-8 text-center text-2xl bg-inverse text-on-inverse">
-                {allCRAData.filter(e => ['Mission', 'Formation', 'Interne'].includes(e.activity_type)).reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
     </main>
   );
 
@@ -1275,12 +1182,10 @@ function App() {
     >
       {renderHeader()}
       {currentUser && currentView === 'cra' && renderSpreadsheet()}
-      {currentUser && currentView === 'conges' && <Conges currentUser={currentUser} />}
       {currentUser && currentView === 'tickets' && <Tickets currentUser={currentUser} />}
-      {currentUser && currentUser.is_admin && currentView === 'activite' && <Activite />}
       {currentUser && currentView === 'projects' && renderProjectsView()}
       {currentUser && currentView === 'admin_cra' && renderAdminCRAView()}
-      {currentUser && currentView === 'admin_global' && renderAdminGlobalView()}
+      {currentUser && currentUser.is_admin && currentView === 'admin_global' && <BilanGlobal />}
       {currentUser && currentView === 'admin_users' && renderAdminUsersView()}
       {currentUser && currentView === 'profile' && renderProfile()}
     </div>

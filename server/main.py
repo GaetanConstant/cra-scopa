@@ -1420,6 +1420,7 @@ def activite(session: Session, debut: date, fin: date) -> List[dict]:
     ).all()
 
     par_utilisateur: dict[int, dict[str, float]] = {}
+    par_type: dict[int, dict[str, float]] = {}
     for ligne in lignes:
         libelle = (
             projets[ligne.project_id].name
@@ -1428,6 +1429,13 @@ def activite(session: Session, debut: date, fin: date) -> List[dict]:
         )
         detail = par_utilisateur.setdefault(ligne.user_id, {})
         detail[libelle] = round(detail.get(libelle, 0.0) + ligne.duration_factor, 2)
+
+        # Repartition par nature d'activite : c'est ce que montrait l'ancien
+        # bilan global, conserve pour ne pas perdre une lecture utile.
+        types = par_type.setdefault(ligne.user_id, {})
+        types[ligne.activity_type] = round(
+            types.get(ligne.activity_type, 0.0) + ligne.duration_factor, 2
+        )
 
     resultat = []
     for utilisateur in utilisateurs:
@@ -1438,6 +1446,7 @@ def activite(session: Session, debut: date, fin: date) -> List[dict]:
                 "user_id": utilisateur.id,
                 "full_name": utilisateur.full_name,
                 **summarise_user(detail, ouvres, absences),
+                "by_activity": par_type.get(utilisateur.id, {}),
                 "by_project": [
                     {"label": libelle, "days": jours}
                     for libelle, jours in sorted(
@@ -1549,6 +1558,30 @@ def poser_etiquettes(session: Session, ticket_id: int, tag_ids: List[int]) -> bo
     return True
 
 
+def ticket_visible(ticket: TkTicket, current_user: "User") -> bool:
+    """Un consultant ne voit que ce qui le concerne.
+
+    « Ses » tickets, ce sont ceux qui lui sont assignes et ceux qu'il a
+    ouverts : sans le second cas, un ticket cree puis laisse sans assigne
+    disparaitrait de la vue de son auteur.
+    """
+    if current_user.is_admin:
+        return True
+    return current_user.id in (ticket.assignee_id, ticket.reporter_id)
+
+
+def ticket_accessible(
+    session: Session, ticket_id: int, current_user: "User"
+) -> TkTicket:
+    """Charge un ticket, ou refuse. Un 404 plutot qu'un 403 sur les tickets
+    d'autrui : confirmer l'existence d'un ticket qu'on ne peut pas voir
+    renseigne deja sur le travail des autres."""
+    ticket = session.get(TkTicket, ticket_id)
+    if ticket is None or not ticket_visible(ticket, current_user):
+        raise HTTPException(status_code=404, detail="Ticket introuvable")
+    return ticket
+
+
 def ticket_en_dict(session: Session, ticket: TkTicket) -> dict:
     # Apres un commit, SQLAlchemy expire les attributs de l'instance et
     # model_dump() ne renvoie plus rien. On recharge avant de serialiser.
@@ -1633,6 +1666,13 @@ def read_board(
     la borne.
     """
     requete = select(TkTicket)
+    if not current_user.is_admin:
+        # Le filtre porte cote serveur : masquer les cartes a l'ecran
+        # laisserait l'API les renvoyer a qui l'appelle directement.
+        requete = requete.where(
+            (TkTicket.assignee_id == current_user.id)
+            | (TkTicket.reporter_id == current_user.id)
+        )
     if mine:
         requete = requete.where(TkTicket.assignee_id == current_user.id)
     elif assignee_id is not None:
@@ -1676,11 +1716,9 @@ def read_board(
 def read_ticket(
     ticket_id: int,
     session: Session = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    ticket = session.get(TkTicket, ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket introuvable")
+    ticket = ticket_accessible(session, ticket_id, current_user)
 
     commentaires = session.exec(
         select(TkComment)
@@ -1738,9 +1776,7 @@ def update_ticket(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    ticket = session.get(TkTicket, ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket introuvable")
+    ticket = ticket_accessible(session, ticket_id, current_user)
 
     champs = req.model_dump(exclude_unset=True)
     tag_ids = champs.pop("tag_ids", None)
@@ -1782,9 +1818,7 @@ def move_ticket(
     Toutes les transitions sont permises, retours en arriere compris. Entrer
     dans `done` horodate la cloture, en sortir l'efface.
     """
-    ticket = session.get(TkTicket, ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket introuvable")
+    ticket = ticket_accessible(session, ticket_id, current_user)
     verifier_valeur(req.status, TICKET_STATUSES, "Statut")
 
     # Les identifiants recus sont des reperes, pas des positions. On relit la
@@ -1893,8 +1927,7 @@ def create_comment(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    if not session.get(TkTicket, ticket_id):
-        raise HTTPException(status_code=404, detail="Ticket introuvable")
+    ticket_accessible(session, ticket_id, current_user)
     if not req.body.strip():
         raise HTTPException(status_code=422, detail="Un commentaire vide n'apporte rien")
 
