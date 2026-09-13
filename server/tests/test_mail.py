@@ -332,24 +332,20 @@ def test_le_rappel_tombe_le_vingt_sur_le_mois_en_cours() -> None:
     assert periode_a_rappeler(date(2026, 10, 30)) is None
 
 
-def test_le_rappel_ne_compte_que_les_jours_passes(
+def test_le_rappel_couvre_tout_le_mois(
     client: TestClient, entetes_admin: dict[str, str], mail_actif
 ) -> None:
-    """Le 20, les jours 21 à 30 n'ont pas eu lieu : ce ne sont pas des trous."""
+    """Le CRA se remplit par anticipation : les jours à venir comptent aussi."""
     import job_closing_reminder
 
     # Le 20 est un dimanche, le rappel part le lundi 21.
     job_closing_reminder.run(date(2026, 9, 21))
     message = next(m for m in FauxSMTP.envoyes if "à compléter" in m["Subject"])
     texte = message.get_body(("plain",)).get_content()
-    # Septembre 2026 : 15 jours ouvrés du 1er au 21, aucun après dans le mail.
-    assert "15 jour(s)" in texte
-    assert "22/09" not in texte
-    assert "30/09" not in texte
+    # Septembre 2026 : 22 jours ouvrés, du 1er au 30, aucun férié.
+    assert "22 jour(s)" in texte
+    assert "30/09" in texte
     assert "salaires" in texte
-
-
-# --- Préférences et configuration ------------------------------------------
 
 
 def test_preferences_par_defaut(

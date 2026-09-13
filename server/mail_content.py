@@ -196,7 +196,7 @@ def closing_reminder(
         sujet = f"CRA {periode} — {len(jours_manquants)} jour(s) à compléter avant clôture"
         detail = [j.strftime("%d/%m") for j in jours_manquants]
         corps_html = _encadre(urgence, CORAIL) + _section_html(
-            "Jours ouvrés non couverts à ce jour", detail, CORAIL
+            "Jours ouvrés non couverts sur le mois", detail, CORAIL
         )
         texte = (
             f"Bonjour {nom},\n\n{urgence}\n\n"
@@ -206,12 +206,12 @@ def closing_reminder(
     else:
         sujet = f"CRA {periode} — à clôturer"
         corps_html = _encadre(urgence) + (
-            f'<p style="margin:0 0 16px">Votre CRA est complet à ce jour, '
+            f'<p style="margin:0 0 16px">Votre CRA est complet, '
             f"il ne reste qu'à le clôturer.</p>"
         )
         texte = (
             f"Bonjour {nom},\n\n{urgence}\n\n"
-            f"Votre CRA de {periode} est complet à ce jour, "
+            f"Votre CRA de {periode} est complet, "
             f"il ne reste qu'à le clôturer."
         )
 

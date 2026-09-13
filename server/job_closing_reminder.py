@@ -6,8 +6,8 @@
 
 Le rappel part le 20, sur le mois en cours : les salaires sont établis à
 partir des CRA clôturés, il faut donc que chacun ait arrêté le sien avant la
-paie. Les jours manquants sont comptés **jusqu'au jour du rappel** — les
-jours à venir ne sont pas des trous, les signaler ferait paniquer pour rien.
+paie. Les jours manquants couvrent **tout le mois**, jours à venir compris :
+le CRA se remplit par anticipation et se clôture avant la fin du mois.
 
 Le job ne fait rien les autres jours : le timer systemd peut tourner tous
 les matins sans réfléchir, c'est ici qu'on décide.
@@ -81,10 +81,7 @@ def run(jour: date, force_periode: str | None = None) -> dict[str, int]:
             )
             return {"hors_calendrier": 1}
 
-        debut, fin_mois = period_bounds(periode)
-        # On ne compte que les jours déjà passés : le 20, les jours 21 à 30
-        # n'ont pas encore eu lieu et ne sont pas des oublis.
-        fin = min(fin_mois, jour)
+        debut, fin = period_bounds(periode)
         feries = charger_feries(session, debut, fin)
         non_clotures = []
 
@@ -107,16 +104,12 @@ def run(jour: date, force_periode: str | None = None) -> dict[str, int]:
                     CRAEntry.date <= fin,
                 )
             ).all()
-            trous = [
-                j
-                for j in missing_working_days(
-                    periode,
-                    [(l.date, l.duration_factor) for l in lignes],
-                    charge_absences(session, utilisateur.id, debut, fin),
-                    feries,
-                )
-                if j <= fin
-            ]
+            trous = missing_working_days(
+                periode,
+                [(l.date, l.duration_factor) for l in lignes],
+                charge_absences(session, utilisateur.id, debut, fin),
+                feries,
+            )
 
             contenu = mail_content.closing_reminder(
                 utilisateur.full_name, periode, trous, base_url
