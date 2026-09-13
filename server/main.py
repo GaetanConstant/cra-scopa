@@ -96,8 +96,8 @@ def get_current_user(
     if payload is None:
         raise CREDENTIALS_ERROR
     user = session.get(User, int(payload["sub"]))
-    if user is None:
-        # Compte supprime depuis l'emission du jeton.
+    if user is None or not user.is_active:
+        # Compte supprime ou desactive depuis l'emission du jeton.
         raise CREDENTIALS_ERROR
     return user
 
@@ -150,7 +150,10 @@ class User(SQLModel, table=True):
     email: str = Field(unique=True, index=True)
     hashed_password: str
     is_admin: bool = False
-    
+    # Un compte desactive ne peut plus se connecter et disparait des listes,
+    # mais ses saisies restent : c'est de l'historique de paie.
+    is_active: bool = True
+
     cra_entries: List["CRAEntry"] = Relationship(back_populates="user")
     projects: List["Project"] = Relationship(back_populates="users", link_model=UserProjectLink)
 
@@ -575,6 +578,10 @@ def login(req: LoginRequest, session: Session = Depends(get_session)):
     # revient a confirmer l'existence d'un compte a qui le demande.
     if not user or not verify_password(req.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Identifiants incorrects")
+    if not user.is_active:
+        # Meme message que pour un mauvais mot de passe : ne pas dire a un
+        # ancien collaborateur que son compte existe encore.
+        raise HTTPException(status_code=401, detail="Identifiants incorrects")
     return {
         "access_token": create_access_token(user.id, user.is_admin),
         "token_type": "bearer",
@@ -645,12 +652,94 @@ def update_user(
     session.refresh(user)
     return user
 
+@app.delete("/users/{user_id}")
+def delete_user(
+    user_id: int,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_admin),
+):
+    """Supprime un compte, ou le desactive s'il porte de l'historique.
+
+    Effacer les saisies d'un ancien collaborateur effacerait de la paie et
+    de la facturation. Un compte qui a saisi du temps est donc desactive :
+    il ne se connecte plus, disparait des listes et des envois, mais ses
+    lignes restent. Un compte vierge — de test, ou cree par erreur — est
+    reellement supprime.
+    """
+    if user_id == admin.id:
+        raise HTTPException(status_code=422, detail="Vous ne pouvez pas supprimer votre propre compte")
+
+    user = session.get(User, user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    if user.is_admin:
+        autres_admins = session.exec(
+            select(User).where(User.is_admin == True, User.is_active == True, User.id != user_id)  # noqa: E712
+        ).first()
+        if autres_admins is None:
+            raise HTTPException(status_code=422, detail="Impossible de supprimer le dernier administrateur")
+
+    a_des_saisies = session.exec(
+        select(CRAEntry).where(CRAEntry.user_id == user_id)
+    ).first() is not None
+    a_des_conges = session.exec(
+        select(LeaveRequest).where(
+            LeaveRequest.user_id == user_id, LeaveRequest.status == "approved"
+        )
+    ).first() is not None
+
+    if a_des_saisies or a_des_conges:
+        user.is_active = False
+        session.add(user)
+        session.commit()
+        logger.warning("Compte %s desactive par %s", user.username, admin.username)
+        return {"status": "deactivated", "user_id": user_id}
+
+    # Compte vierge : on retire ce qui le reference, puis le compte lui-meme.
+    for modele, colonne in (
+        (UserProjectLink, UserProjectLink.user_id),
+        (LeaveRequest, LeaveRequest.user_id),
+        (LeaveBalance, LeaveBalance.user_id),
+        (NotificationPrefs, NotificationPrefs.user_id),
+        (EmailLog, EmailLog.user_id),
+        (MonthClosure, MonthClosure.user_id),
+    ):
+        for ligne in session.exec(select(modele).where(colonne == user_id)).all():
+            session.delete(ligne)
+
+    # Les tickets survivent a leur auteur ou a leur assigne.
+    for ticket in session.exec(
+        select(TkTicket).where(
+            (TkTicket.assignee_id == user_id) | (TkTicket.reporter_id == user_id)
+        )
+    ).all():
+        if ticket.assignee_id == user_id:
+            ticket.assignee_id = None
+        if ticket.reporter_id == user_id:
+            ticket.reporter_id = None
+        session.add(ticket)
+    for commentaire in session.exec(select(TkComment).where(TkComment.author_id == user_id)).all():
+        commentaire.author_id = None
+        session.add(commentaire)
+    for evenement in session.exec(select(TkEvent).where(TkEvent.user_id == user_id)).all():
+        evenement.user_id = None
+        session.add(evenement)
+
+    session.delete(user)
+    session.commit()
+    logger.warning("Compte %s supprime par %s", user.username, admin.username)
+    return {"status": "deleted", "user_id": user_id}
+
+
 @app.get("/users/")
 def read_users(
     session: Session = Depends(get_session),
     _user: User = Depends(get_current_user),
 ):
-    statement = select(User).options(selectinload(User.projects))
+    statement = (
+        select(User).where(User.is_active == True).options(selectinload(User.projects))  # noqa: E712
+    )
     users = session.exec(statement).all()
     # Explicitly convert to dict to include relationships
     return [
@@ -1410,7 +1499,9 @@ def activite(session: Session, debut: date, fin: date) -> List[dict]:
     Un seul parcours des saisies et des absences, puis un agregat par
     utilisateur : les ecrans en avaient besoin ensemble, pas separement.
     """
-    utilisateurs = session.exec(select(User).order_by(User.full_name)).all()
+    utilisateurs = session.exec(
+        select(User).where(User.is_active == True).order_by(User.full_name)  # noqa: E712
+    ).all()
     projets = {p.id: p for p in session.exec(select(Project)).all()}
     feries = charger_feries(session, debut, fin)
     ouvres = working_days_count(debut, fin, feries)

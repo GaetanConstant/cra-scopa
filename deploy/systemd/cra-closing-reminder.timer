@@ -2,9 +2,9 @@
 Description=Rappel de clôture du CRA
 
 [Timer]
-# Le job tourne tous les jours et décide lui-même : il n'agit que le dernier
-# jour ouvré du mois, puis le 3 du mois suivant. Mettre ce calendrier dans
-# systemd obligerait à y encoder les jours fériés.
+# Le job tourne tous les jours et décide lui-même : il n'agit que le premier
+# jour ouvré à partir du 20. Mettre ce calendrier dans systemd obligerait à y
+# encoder les week-ends et les jours fériés.
 OnCalendar=*-*-* 09:00
 Persistent=true
 

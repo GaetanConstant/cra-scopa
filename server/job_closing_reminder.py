@@ -1,16 +1,19 @@
-"""Rappel de clôture du CRA.
+"""Rappel de clôture du CRA, le 20 de chaque mois.
 
     uv run python job_closing_reminder.py            # décide selon la date
-    uv run python job_closing_reminder.py 2026-09-30 # simule un jour donné
-    uv run python job_closing_reminder.py --force    # ignore le calendrier
+    uv run python job_closing_reminder.py 2026-09-20 # simule un jour donné
+    uv run python job_closing_reminder.py --force 2026-09
 
-Le job ne fait quelque chose que deux fois par mois : le dernier jour ouvré,
-puis le 3 du mois suivant si la période est encore ouverte. Le timer systemd
-peut donc tourner tous les jours sans réfléchir — c'est ici qu'on décide.
+Le rappel part le 20, sur le mois en cours : les salaires sont établis à
+partir des CRA clôturés, il faut donc que chacun ait arrêté le sien avant la
+paie. Les jours manquants sont comptés **jusqu'au jour du rappel** — les
+jours à venir ne sont pas des trous, les signaler ferait paniquer pour rien.
+
+Le job ne fait rien les autres jours : le timer systemd peut tourner tous
+les matins sans réfléchir, c'est ici qu'on décide.
 """
 
 import argparse
-import calendar
 import logging
 import sys
 from datetime import date, datetime, timedelta
@@ -34,25 +37,30 @@ from timesheet import missing_working_days, period_bounds
 logger = logging.getLogger(__name__)
 
 KIND = "closing_reminder"
-JOUR_DE_RELANCE = 3
+JOUR_DU_RAPPEL = 20
 
 
-def dernier_jour_ouvre(annee: int, mois: int, feries: set[date]) -> date:
-    """Dernier jour de la semaine du mois qui ne soit pas férié."""
-    jour = date(annee, mois, calendar.monthrange(annee, mois)[1])
+def jour_de_rappel(annee: int, mois: int, feries: set[date]) -> date:
+    """Premier jour ouvré du mois à partir du 20.
+
+    Un rappel envoyé un dimanche est lu le lundi au milieu d'autre chose ;
+    un rappel envoyé le lundi est lu le lundi.
+    """
+    jour = date(annee, mois, JOUR_DU_RAPPEL)
     while jour.weekday() >= 5 or jour in feries:
-        jour -= timedelta(days=1)
+        jour += timedelta(days=1)
     return jour
 
 
-def periode_a_rappeler(jour: date, feries: set[date]) -> str | None:
-    """Période concernée par un rappel ce jour-là, ou None."""
-    if jour == dernier_jour_ouvre(jour.year, jour.month, feries):
-        return f"{jour.year:04d}-{jour.month:02d}"
-    if jour.day == JOUR_DE_RELANCE:
-        precedent = date(jour.year, jour.month, 1) - timedelta(days=1)
-        return f"{precedent.year:04d}-{precedent.month:02d}"
-    return None
+def periode_a_rappeler(jour: date, feries: set[date] = frozenset()) -> str | None:
+    """Période concernée par un rappel ce jour-là, ou None.
+
+    Le rappel porte sur le mois en cours, le premier jour ouvré à partir du
+    20. Les autres jours, rien.
+    """
+    if jour != jour_de_rappel(jour.year, jour.month, feries):
+        return None
+    return f"{jour.year:04d}-{jour.month:02d}"
 
 
 def run(jour: date, force_periode: str | None = None) -> dict[str, int]:
@@ -61,18 +69,26 @@ def run(jour: date, force_periode: str | None = None) -> dict[str, int]:
     base_url = config_mail().base_url
 
     with Session(engine) as session:
-        annee = jour.year
-        feries_annee = charger_feries(session, date(annee, 1, 1), date(annee, 12, 31))
-        periode = force_periode or periode_a_rappeler(jour, feries_annee)
+        feries_du_mois = charger_feries(
+            session, date(jour.year, jour.month, 1), date(jour.year, jour.month, 28)
+        )
+        periode = force_periode or periode_a_rappeler(jour, feries_du_mois)
         if periode is None:
-            logger.info("%s n'est ni une fin de mois ouvrée ni un %s.", jour, JOUR_DE_RELANCE)
+            logger.info(
+                "%s n'est pas le jour de rappel (%s).",
+                jour,
+                jour_de_rappel(jour.year, jour.month, feries_du_mois),
+            )
             return {"hors_calendrier": 1}
 
-        debut, fin = period_bounds(periode)
+        debut, fin_mois = period_bounds(periode)
+        # On ne compte que les jours déjà passés : le 20, les jours 21 à 30
+        # n'ont pas encore eu lieu et ne sont pas des oublis.
+        fin = min(fin_mois, jour)
         feries = charger_feries(session, debut, fin)
         non_clotures = []
 
-        for utilisateur in session.exec(select(User)).all():
+        for utilisateur in session.exec(select(User).where(User.is_active == True)).all():  # noqa: E712
             cloture = session.get(MonthClosure, (utilisateur.id, periode))
             if cloture is not None and cloture.status == "closed":
                 resultats["cloture"] = resultats.get("cloture", 0) + 1
@@ -91,12 +107,16 @@ def run(jour: date, force_periode: str | None = None) -> dict[str, int]:
                     CRAEntry.date <= fin,
                 )
             ).all()
-            trous = missing_working_days(
-                periode,
-                [(l.date, l.duration_factor) for l in lignes],
-                charge_absences(session, utilisateur.id, debut, fin),
-                feries,
-            )
+            trous = [
+                j
+                for j in missing_working_days(
+                    periode,
+                    [(l.date, l.duration_factor) for l in lignes],
+                    charge_absences(session, utilisateur.id, debut, fin),
+                    feries,
+                )
+                if j <= fin
+            ]
 
             contenu = mail_content.closing_reminder(
                 utilisateur.full_name, periode, trous, base_url

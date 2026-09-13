@@ -51,13 +51,30 @@ def test_recap_liste_les_sections_remplies() -> None:
     assert "En cours" not in contenu["html"]
 
 
-def test_html_sans_image_ni_police_distante() -> None:
+def test_html_sans_ressource_distante() -> None:
+    """Le logo est joint au message (cid:), rien n'est chargé depuis un serveur."""
+    import re
+
     contenu = mail_content.digest("A", {"X": ["y"]}, "https://cra.scopa.co")
     html = contenu["html"]
-    assert "<img" not in html
+    sources = re.findall(r'<img[^>]+src="([^"]+)"', html)
+    assert sources == ["cid:scopa-logo"]
     assert "fonts.googleapis" not in html
     assert "<link" not in html
     assert "style=" in html  # styles en ligne
+
+
+def test_le_logo_est_joint_au_message() -> None:
+    contenu = mail_content.digest("A", {"X": ["y"]}, "https://cra.scopa.co")
+    message = mailer.build_message(
+        CONFIG_ACTIVE, "a@b.co", contenu["subject"], contenu["text"], contenu["html"]
+    )
+    pieces = [
+        (p.get_content_type(), p.get("Content-ID"))
+        for p in message.walk()
+        if p.get_content_type() == "image/png"
+    ]
+    assert pieces == [("image/png", "<scopa-logo>")]
 
 
 def test_contenu_echappe_le_html() -> None:
@@ -305,11 +322,31 @@ def test_rappel_saute_les_periodes_cloturees(
     assert resultats.get("cloture", 0) == 1
 
 
-def test_dernier_jour_ouvre_saute_le_week_end() -> None:
-    from job_closing_reminder import dernier_jour_ouvre
+def test_le_rappel_tombe_le_vingt_sur_le_mois_en_cours() -> None:
+    from job_closing_reminder import periode_a_rappeler
 
-    # 31 mai 2026 est un dimanche : le dernier jour ouvré est le vendredi 29.
-    assert dernier_jour_ouvre(2026, 5, set()) == date(2026, 5, 29)
+    # 20 octobre 2026 est un mardi : le rappel part ce jour-là.
+    assert periode_a_rappeler(date(2026, 10, 20)) == "2026-10"
+    assert periode_a_rappeler(date(2026, 10, 19)) is None
+    assert periode_a_rappeler(date(2026, 10, 21)) is None
+    assert periode_a_rappeler(date(2026, 10, 30)) is None
+
+
+def test_le_rappel_ne_compte_que_les_jours_passes(
+    client: TestClient, entetes_admin: dict[str, str], mail_actif
+) -> None:
+    """Le 20, les jours 21 à 30 n'ont pas eu lieu : ce ne sont pas des trous."""
+    import job_closing_reminder
+
+    # Le 20 est un dimanche, le rappel part le lundi 21.
+    job_closing_reminder.run(date(2026, 9, 21))
+    message = next(m for m in FauxSMTP.envoyes if "à compléter" in m["Subject"])
+    texte = message.get_body(("plain",)).get_content()
+    # Septembre 2026 : 15 jours ouvrés du 1er au 21, aucun après dans le mail.
+    assert "15 jour(s)" in texte
+    assert "22/09" not in texte
+    assert "30/09" not in texte
+    assert "salaires" in texte
 
 
 # --- Préférences et configuration ------------------------------------------
@@ -358,3 +395,24 @@ def test_envoi_d_essai_ne_consomme_pas_le_recap_du_jour(
     with Session(engine) as session:
         traces = session.exec(select(EmailLog)).all()
     assert traces == []
+
+
+def test_recap_ignore_les_feries(mail_actif) -> None:
+    import job_digest
+
+    # 11 novembre 2026, un mercredi.
+    assert job_digest.run(date(2026, 11, 11)) == {"ferie": 1}
+
+
+def test_le_rappel_glisse_apres_un_week_end_ou_un_ferie() -> None:
+    from job_closing_reminder import jour_de_rappel, periode_a_rappeler
+
+    # 20 septembre 2026 est un dimanche : le rappel part le lundi 21.
+    assert jour_de_rappel(2026, 9, set()) == date(2026, 9, 21)
+    assert periode_a_rappeler(date(2026, 9, 20)) is None
+    assert periode_a_rappeler(date(2026, 9, 21)) == "2026-09"
+
+    # 20 mai 2027 tombe un jeudi de l'Ascension (Pâques le 28 mars 2027 + 39) :
+    # on glisse au vendredi 21.
+    assert jour_de_rappel(2027, 5, {date(2027, 5, 6)}) == date(2027, 5, 20)
+    assert jour_de_rappel(2027, 5, {date(2027, 5, 20)}) == date(2027, 5, 21)

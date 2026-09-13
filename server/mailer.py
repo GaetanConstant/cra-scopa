@@ -16,6 +16,7 @@ import os
 import smtplib
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from email.message import EmailMessage
 from typing import Optional
 
@@ -74,13 +75,21 @@ class MailConfig:
         ]
 
 
+LOGO = Path(__file__).parent / "assets" / "scopa-logo.png"
+LOGO_CID = "scopa-logo"
+
+
 def build_message(
     config: MailConfig, to: str, subject: str, text: str, html: str
 ) -> EmailMessage:
-    """Message multipart texte + HTML.
+    """Message multipart texte + HTML, logo SCOPA joint en ligne.
 
     La version texte n'est pas une politesse : certains clients ne rendent
     que celle-là, et une alternative absente fait chuter la délivrabilité.
+
+    Le logo voyage avec le message plutôt que d'être chargé depuis un
+    serveur : les clients bloquent les images distantes par défaut, une
+    pièce jointe en ligne s'affiche sans que le lecteur ait rien à autoriser.
     """
     message = EmailMessage()
     message["From"] = config.sender
@@ -88,6 +97,16 @@ def build_message(
     message["Subject"] = subject
     message.set_content(text)
     message.add_alternative(html, subtype="html")
+
+    if f"cid:{LOGO_CID}" in html and LOGO.exists():
+        partie_html = message.get_payload()[-1]
+        partie_html.add_related(
+            LOGO.read_bytes(),
+            maintype="image",
+            subtype="png",
+            cid=f"<{LOGO_CID}>",
+            filename="scopa.png",
+        )
     return message
 
 

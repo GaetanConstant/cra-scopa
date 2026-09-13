@@ -15,10 +15,25 @@ from typing import Mapping, Sequence
 
 logger = logging.getLogger(__name__)
 
+# Tokens de la charte, repris de client/src/theme.css. Les emails ne peuvent
+# pas charger de feuille de style : les valeurs sont donc écrites en dur ici,
+# et c'est le seul endroit du code serveur où c'est le cas.
 BLEU = "#6186EA"
+BLEU_PALE = "#eef2fd"
 ENCRE = "#1a1a1a"
 GRIS = "#6b7280"
 CORAIL = "#ef4444"
+VERT = "#22c55e"
+FOND = "#EDECEA"
+CARTE = "#ffffff"
+TRAIT = "#e8e7e5"
+
+# Le logo est joint au message, pas chargé depuis un serveur : voir mailer.py.
+LOGO_CID = "scopa-logo"
+
+POLICE = (
+    "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+)
 
 
 def _echapper(texte: str) -> str:
@@ -31,37 +46,102 @@ def _echapper(texte: str) -> str:
     )
 
 
-def _coquille(titre: str, corps_html: str, lien: str) -> str:
-    return (
-        f'<div style="font-family:Helvetica,Arial,sans-serif;color:{ENCRE};'
-        f'max-width:600px;margin:0 auto;padding:24px">'
-        f'<h1 style="font-size:18px;margin:0 0 20px">{_echapper(titre)}</h1>'
-        f"{corps_html}"
-        f'<p style="margin-top:28px">'
-        f'<a href="{_echapper(lien)}" style="background:{BLEU};color:#fff;'
-        f'text-decoration:none;padding:12px 20px;border-radius:9999px;'
-        f'font-weight:bold;font-size:13px">Ouvrir le CRA</a></p>'
-        f'<p style="color:{GRIS};font-size:11px;margin-top:24px">'
-        f"CRA SCOPA — message automatique, ne pas répondre.</p>"
-        f"</div>"
+def _coquille(titre: str, corps_html: str, lien: str, accroche: str = "") -> str:
+    """Gabarit commun : bandeau au logo, carte blanche, bouton, pied de page.
+
+    Mise en page en tableaux et styles en ligne. Ce n'est pas du HTML qu'on
+    écrirait pour un navigateur, mais les clients de messagerie ignorent les
+    feuilles de style et rendent mal flexbox et grid : le tableau reste la
+    seule structure qui tient de Gmail à Outlook.
+    """
+    sous_titre = (
+        f'<p style="margin:6px 0 0;font-family:{POLICE};font-size:13px;color:{GRIS}">'
+        f"{_echapper(accroche)}</p>"
+        if accroche
+        else ""
     )
+
+    return f"""\
+<div style="margin:0;padding:0;background:{FOND}">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+         style="background:{FOND};padding:28px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+             style="max-width:560px;background:{CARTE};border-radius:20px;
+                    border:1px solid {TRAIT};overflow:hidden">
+
+        <tr><td style="padding:24px 28px 0">
+          <img src="cid:{LOGO_CID}" width="52" alt="SCOPA"
+               style="display:block;border:0;width:52px;height:auto" />
+        </td></tr>
+
+        <tr><td style="padding:18px 28px 0">
+          <h1 style="margin:0;font-family:{POLICE};font-size:20px;
+                     font-weight:800;color:{ENCRE};letter-spacing:-0.3px">
+            {_echapper(titre)}</h1>
+          {sous_titre}
+        </td></tr>
+
+        <tr><td style="padding:20px 28px 4px;font-family:{POLICE};
+                       font-size:14px;line-height:1.55;color:{ENCRE}">
+          {corps_html}
+        </td></tr>
+
+        <tr><td style="padding:8px 28px 30px">
+          <a href="{_echapper(lien)}"
+             style="display:inline-block;background:{BLEU};color:#ffffff;
+                    text-decoration:none;padding:13px 26px;border-radius:9999px;
+                    font-family:{POLICE};font-size:12px;font-weight:800;
+                    text-transform:uppercase;letter-spacing:0.08em">
+            Ouvrir le CRA</a>
+        </td></tr>
+
+        <tr><td style="padding:16px 28px;background:{BLEU_PALE};
+                       font-family:{POLICE};font-size:11px;color:{GRIS}">
+          CRA SCOPA — message automatique, ne pas répondre.<br />
+          Pour ne plus recevoir ces messages, décochez-les dans votre profil.
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</div>"""
 
 
 def _liste_html(items: Sequence[str], couleur: str = ENCRE) -> str:
+    """Liste en lignes de tableau plutôt qu'en <ul> : les puces et les marges
+    des listes varient trop d'un client à l'autre."""
     lignes = "".join(
-        f'<li style="margin-bottom:6px;color:{couleur}">{_echapper(i)}</li>'
+        f'<tr><td style="padding:5px 0;font-family:{POLICE};font-size:14px;'
+        f'color:{couleur};vertical-align:top">'
+        f'<span style="color:{couleur};font-weight:700">•</span>&nbsp;&nbsp;'
+        f"{_echapper(i)}</td></tr>"
         for i in items
     )
-    return f'<ul style="padding-left:18px;margin:0 0 16px">{lignes}</ul>'
+    return (
+        '<table role="presentation" width="100%" cellpadding="0" '
+        f'cellspacing="0" style="margin:0 0 14px">{lignes}</table>'
+    )
 
 
 def _section_html(titre: str, items: Sequence[str], couleur: str = ENCRE) -> str:
     if not items:
         return ""
     return (
-        f'<h2 style="font-size:13px;text-transform:uppercase;letter-spacing:1px;'
-        f'color:{GRIS};margin:20px 0 8px">{_echapper(titre)}</h2>'
-        + _liste_html(items, couleur)
+        f'<p style="margin:18px 0 6px;font-family:{POLICE};font-size:11px;'
+        f"font-weight:800;text-transform:uppercase;letter-spacing:0.1em;"
+        f'color:{couleur}">{_echapper(titre)}</p>' + _liste_html(items, couleur)
+    )
+
+
+def _encadre(texte: str, couleur: str = BLEU) -> str:
+    """Bandeau d'accroche, pour ce qui doit être lu même en diagonale."""
+    return (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="margin:0 0 16px"><tr><td style="background:{BLEU_PALE};'
+        f"border-left:3px solid {couleur};border-radius:8px;padding:12px 14px;"
+        f'font-family:{POLICE};font-size:13px;color:{ENCRE}">'
+        f"{_echapper(texte)}</td></tr></table>"
     )
 
 
@@ -84,46 +164,63 @@ def digest(nom: str, sections: Mapping[str, Sequence[str]], lien: str) -> dict |
         lignes_texte.append(f"{titre.upper()}")
         lignes_texte.extend(f"  - {i}" for i in items)
         lignes_texte.append("")
-        couleur = CORAIL if "retard" in titre.lower() else ENCRE
+        bas = titre.lower()
+        couleur = CORAIL if "retard" in bas else BLEU if "valider" in bas else ENCRE
         corps_html += _section_html(titre, items, couleur)
 
     lignes_texte.append(lien)
     return {
         "subject": sujet,
         "text": "\n".join(lignes_texte),
-        "html": _coquille(f"Bonjour {nom}", corps_html, lien),
+        "html": _coquille(
+            f"Bonjour {nom}",
+            corps_html,
+            lien,
+            accroche=f"{total} point{'s' if total > 1 else ''} à regarder ce matin",
+        ),
     }
 
 
 def closing_reminder(
     nom: str, periode: str, jours_manquants: Sequence[date], lien: str
 ) -> dict:
-    """Rappel de clôture. Part même sans trou : c'est la clôture qu'on réclame."""
+    """Rappel de clôture du 20, motivé par la paie.
+
+    Le motif est dit explicitement : « clôturez votre CRA » sans raison se
+    range dans les tâches qu'on remet à demain, « les salaires en dépendent »
+    beaucoup moins.
+    """
+    urgence = "Les salaires du mois sont établis à partir des CRA clôturés."
+
     if jours_manquants:
-        sujet = f"CRA {periode} — {len(jours_manquants)} jour(s) à compléter"
+        sujet = f"CRA {periode} — {len(jours_manquants)} jour(s) à compléter avant clôture"
         detail = [j.strftime("%d/%m") for j in jours_manquants]
-        corps_html = _section_html("Jours ouvrés non couverts", detail, CORAIL)
+        corps_html = _encadre(urgence, CORAIL) + _section_html(
+            "Jours ouvrés non couverts à ce jour", detail, CORAIL
+        )
         texte = (
-            f"Bonjour {nom},\n\n"
-            f"Votre CRA de {periode} n'est pas clôturé et il reste "
-            f"{len(jours_manquants)} jour(s) ouvré(s) sans saisie ni absence :\n"
-            + "\n".join(f"  - {d}" for d in detail)
+            f"Bonjour {nom},\n\n{urgence}\n\n"
+            f"Il reste {len(jours_manquants)} jour(s) ouvré(s) sans saisie ni "
+            f"absence sur {periode} :\n" + "\n".join(f"  - {d}" for d in detail)
         )
     else:
         sujet = f"CRA {periode} — à clôturer"
-        corps_html = (
-            f'<p style="margin:0 0 16px">Votre CRA est complet, '
+        corps_html = _encadre(urgence) + (
+            f'<p style="margin:0 0 16px">Votre CRA est complet à ce jour, '
             f"il ne reste qu'à le clôturer.</p>"
         )
         texte = (
-            f"Bonjour {nom},\n\nVotre CRA de {periode} est complet, "
+            f"Bonjour {nom},\n\n{urgence}\n\n"
+            f"Votre CRA de {periode} est complet à ce jour, "
             f"il ne reste qu'à le clôturer."
         )
 
     return {
         "subject": sujet,
         "text": f"{texte}\n\n{lien}",
-        "html": _coquille(f"CRA {periode}", corps_html, lien),
+        "html": _coquille(
+            f"CRA {periode}", corps_html, lien, accroche=f"Bonjour {nom}"
+        ),
     }
 
 
@@ -134,7 +231,7 @@ def leave_decision(
     """Décision sur une demande de congé, envoyée au demandeur."""
     verdict = "approuvée" if approuve else "refusée"
     sujet = f"Demande de congé {verdict} — {debut:%d/%m} au {fin:%d/%m}"
-    couleur = "#22c55e" if approuve else CORAIL
+    couleur = VERT if approuve else CORAIL
 
     texte = (
         f"Bonjour {nom},\n\n"
@@ -144,22 +241,21 @@ def leave_decision(
     if commentaire:
         texte += f"\n\nCommentaire : {commentaire}"
 
-    corps_html = (
-        f'<p style="margin:0 0 12px">Votre demande de '
+    corps_html = _encadre(f"Demande {verdict}", couleur) + (
+        f'<p style="margin:0 0 12px">'
         f"<strong>{_echapper(type_absence)}</strong> du "
-        f"{debut:%d/%m/%Y} au {fin:%d/%m/%Y} ({jours} jour(s)) a été "
-        f'<strong style="color:{couleur}">{verdict}</strong>.</p>'
+        f"{debut:%d/%m/%Y} au {fin:%d/%m/%Y} — {jours} jour(s).</p>"
     )
     if commentaire:
         corps_html += (
-            f'<p style="margin:0 0 12px;color:{GRIS}">'
+            f'<p style="margin:0 0 12px;color:{GRIS};font-style:italic">'
             f"« {_echapper(commentaire)} »</p>"
         )
 
     return {
         "subject": sujet,
         "text": f"{texte}\n\n{lien}",
-        "html": _coquille("Demande de congé", corps_html, lien),
+        "html": _coquille("Demande de congé", corps_html, lien, accroche=f"Bonjour {nom}"),
     }
 
 
@@ -168,10 +264,10 @@ def leave_request_notice(
 ) -> dict:
     """Nouvelle demande, envoyée aux administrateurs."""
     sujet = f"Congé à valider — {demandeur}, {debut:%d/%m} au {fin:%d/%m}"
-    corps_html = (
-        f'<p style="margin:0 0 12px"><strong>{_echapper(demandeur)}</strong> '
-        f"demande {_echapper(type_absence)} du {debut:%d/%m/%Y} au "
-        f"{fin:%d/%m/%Y}, soit {jours} jour(s).</p>"
+    corps_html = _encadre(f"{demandeur} attend votre décision") + (
+        f'<p style="margin:0 0 12px">'
+        f"<strong>{_echapper(type_absence)}</strong> du {debut:%d/%m/%Y} au "
+        f"{fin:%d/%m/%Y} — {jours} jour(s).</p>"
     )
     texte = (
         f"{demandeur} demande {type_absence} du {debut:%d/%m/%Y} "

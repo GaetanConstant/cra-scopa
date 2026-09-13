@@ -21,6 +21,7 @@ from sqlmodel import Session, select
 from main import (
     EmailLog,
     Project,
+    PublicHoliday,
     TkTicket,
     User,
     config_mail,
@@ -111,7 +112,13 @@ def run(jour: date) -> dict[str, int]:
     base_url = config_mail().base_url
 
     with Session(engine) as session:
-        for utilisateur in session.exec(select(User)).all():
+        # Un récap le 11 novembre serait lu le 12, avec un jour de retard sur
+        # tout ce qu'il annonce. On se tait les jours fériés.
+        if session.get(PublicHoliday, jour) is not None:
+            logger.info("%s est férié, pas de récap.", jour)
+            return {"ferie": 1}
+
+        for utilisateur in session.exec(select(User).where(User.is_active == True)).all():  # noqa: E712
             if not prefs_de(session, utilisateur.id).daily_digest:
                 resultats["prefs_off"] = resultats.get("prefs_off", 0) + 1
                 continue

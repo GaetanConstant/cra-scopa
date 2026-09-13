@@ -378,3 +378,100 @@ def test_le_detail_dit_si_on_peut_supprimer(
 
     vu_par_l_admin = client.get(f"/tickets/{confie['id']}", headers=entetes_admin).json()
     assert vu_par_l_admin["can_delete"] is True
+
+
+# --- Suppression d'utilisateurs --------------------------------------------
+
+
+def test_consultant_ne_supprime_pas_de_compte(
+    client: TestClient, entetes_consultant: dict[str, str], admin_id: int
+) -> None:
+    assert client.delete(f"/users/{admin_id}", headers=entetes_consultant).status_code == 403
+
+
+def test_compte_vierge_est_supprime(
+    client: TestClient, entetes_admin: dict[str, str]
+) -> None:
+    nouveau = client.post(
+        "/users/",
+        json={"full_name": "Test", "username": "test", "email": "t@t.co"},
+        headers=entetes_admin,
+    ).json()
+    reponse = client.delete(f"/users/{nouveau['id']}", headers=entetes_admin)
+    assert reponse.status_code == 200
+    assert reponse.json()["status"] == "deleted"
+    assert nouveau["id"] not in {u["id"] for u in client.get("/users/", headers=entetes_admin).json()}
+
+
+def test_compte_avec_saisies_est_desactive(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    consultant_id: int,
+) -> None:
+    """L'historique de paie ne s'efface pas : on désactive."""
+    client.post(
+        "/cra/batch",
+        json=[{"date": "2026-06-01", "duration_factor": 1.0, "activity_type": "Interne",
+               "user_id": consultant_id}],
+        headers=entetes_consultant,
+    )
+    reponse = client.delete(f"/users/{consultant_id}", headers=entetes_admin)
+    assert reponse.status_code == 200
+    assert reponse.json()["status"] == "deactivated"
+
+    # Plus dans la liste, plus de connexion, mais les lignes sont toujours là.
+    assert consultant_id not in {u["id"] for u in client.get("/users/", headers=entetes_admin).json()}
+    from conftest import MOT_DE_PASSE
+    assert (
+        client.post("/auth/login", json={"username": "consultant", "password": MOT_DE_PASSE}).status_code
+        == 401
+    )
+    assert len(client.get(f"/cra/{consultant_id}/2026/6", headers=entetes_admin).json()) == 1
+
+
+def test_jeton_d_un_compte_desactive_est_refuse(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    consultant_id: int,
+) -> None:
+    client.post(
+        "/cra/batch",
+        json=[{"date": "2026-06-01", "duration_factor": 1.0, "activity_type": "Interne",
+               "user_id": consultant_id}],
+        headers=entetes_consultant,
+    )
+    client.delete(f"/users/{consultant_id}", headers=entetes_admin)
+    assert client.get("/projects/", headers=entetes_consultant).status_code == 401
+
+
+def test_admin_ne_se_supprime_pas_lui_meme(
+    client: TestClient, entetes_admin: dict[str, str], admin_id: int
+) -> None:
+    assert client.delete(f"/users/{admin_id}", headers=entetes_admin).status_code == 422
+
+
+def test_dernier_admin_est_protege(
+    client: TestClient, entetes_admin: dict[str, str], admin_id: int
+) -> None:
+    autre = client.post(
+        "/users/",
+        json={"full_name": "Second", "username": "second", "email": "s@t.co", "is_admin": True},
+        headers=entetes_admin,
+    ).json()
+    # Le second admin peut partir : il en reste un.
+    assert client.delete(f"/users/{autre['id']}", headers=entetes_admin).status_code == 200
+
+
+def test_tickets_survivent_a_la_suppression_de_leur_auteur(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    consultant_id: int,
+) -> None:
+    ticket = _ticket(client, entetes_consultant, assignee_id=consultant_id)
+    assert client.delete(f"/users/{consultant_id}", headers=entetes_admin).json()["status"] == "deleted"
+    detail = client.get(f"/tickets/{ticket['id']}", headers=entetes_admin).json()
+    assert detail["assignee_id"] is None
+    assert detail["reporter_id"] is None

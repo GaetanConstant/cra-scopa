@@ -3,6 +3,7 @@ import axios from 'axios'
 import {
   API_BASE,
   closePeriod,
+  deleteUser,
   getMailConfig,
   getPrefs,
   getTimesheet,
@@ -165,6 +166,26 @@ function App() {
       getMailConfig().then(setMailConfig).catch(() => setMailConfig(null))
     }
   }, [currentUser, currentView])
+
+  const supprimerUtilisateur = async (u) => {
+    // Le serveur décide entre suppression et désactivation ; on prévient
+    // du cas le plus probable pour un compte qui a travaillé.
+    const ok = window.confirm(
+      `Supprimer ${u.full_name} ?\n\n` +
+      "S'il a des saisies, le compte sera désactivé et son historique conservé. " +
+      "Sinon il sera définitivement supprimé.",
+    )
+    if (!ok) return
+    try {
+      const r = await deleteUser(u.id)
+      setSaveStatus('success')
+      setErrorMsg(r.status === 'deactivated' ? `${u.full_name} désactivé — historique conservé.` : '')
+      setTimeout(() => setSaveStatus(null), 3000)
+      fetchAllUsers()
+    } catch (err) {
+      setErrorMsg(messageErreur(err, "La suppression a échoué"))
+    }
+  }
 
   const basculerPref = async (champ) => {
     const precedent = prefs
@@ -948,6 +969,11 @@ function App() {
       <h2 className="text-5xl font-black uppercase tracking-tighter mb-10">
         {editingUser ? 'Modifier le Collaborateur' : 'Gestion Collaborateurs'}
       </h2>
+        {errorMsg && (
+          <div role="status" className="alert-error mb-6 max-w-2xl">
+            <AlertCircle size={16} /> {errorMsg}
+          </div>
+        )}
 
       <div className="bg-card rounded-[40px] p-10 border-2 border-line-strong shadow-2xl mb-12">
         <form onSubmit={async (e) => {
@@ -1007,15 +1033,27 @@ function App() {
                 </div>
                 <p className="text-xs text-ink-muted font-black tracking-widest mt-1">@{u.username} • {u.email}</p>
               </div>
-              <button
-                onClick={() => {
-                  setEditingUser(u);
-                  setUserForm({ fullName: u.full_name, username: u.username, email: u.email, isAdmin: u.is_admin, password: '' });
-                }}
-                className="p-3 bg-input rounded-xl hover:bg-hovered transition-all text-ink-muted hover:text-ink"
-              >
-                <Settings size={18} />
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setEditingUser(u);
+                    setUserForm({ fullName: u.full_name, username: u.username, email: u.email, isAdmin: u.is_admin, password: '' });
+                  }}
+                  aria-label="Modifier"
+                  className="p-3 bg-input rounded-xl hover:bg-hovered transition-all text-ink-muted hover:text-ink"
+                >
+                  <Settings size={18} />
+                </button>
+                {u.id !== currentUser.id && (
+                  <button
+                    onClick={() => supprimerUtilisateur(u)}
+                    aria-label="Supprimer"
+                    className="p-3 bg-input rounded-xl hover:bg-hovered transition-all text-ink-muted hover:text-danger"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div>
