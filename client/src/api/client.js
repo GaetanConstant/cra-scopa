@@ -100,3 +100,10 @@ export const getActivity = (from_date, to_date) =>
   get('/reporting/activity', { from_date, to_date })
 export const exportActivity = (from_date, to_date) =>
   get('/reporting/activity/export', { from_date, to_date })
+
+// --- Notifications ---------------------------------------------------------
+
+export const getPrefs = () => get('/notifications/prefs')
+export const patchPrefs = (corps) => patch('/notifications/prefs', corps)
+export const getMailConfig = () => get('/notifications/config')
+export const testDigest = () => post('/notifications/digest/test')

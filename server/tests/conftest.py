@@ -23,10 +23,12 @@ import main  # noqa: E402
 from main import (  # noqa: E402
     Client,
     CRAEntry,
+    EmailLog,
     LeaveBalance,
     LeaveRequest,
     LeaveType,
     MonthClosure,
+    NotificationPrefs,
     Project,
     PublicHoliday,
     TkComment,
@@ -50,6 +52,9 @@ def base_vierge() -> Iterator[None]:
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         modeles = (
+            EmailLog,
+            NotificationPrefs,
+            MonthClosure,
             TkComment,
             TkEvent,
             TkTicketTag,

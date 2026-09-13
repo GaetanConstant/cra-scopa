@@ -1,0 +1,9 @@
+[Unit]
+Description=Récap matinal du CRA, du lundi au vendredi à 8h
+
+[Timer]
+OnCalendar=Mon..Fri 08:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

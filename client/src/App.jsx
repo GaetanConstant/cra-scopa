@@ -1,6 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import axios from 'axios'
-import { API_BASE, closePeriod, getTimesheet, messageErreur } from './api/client'
+import {
+  API_BASE,
+  closePeriod,
+  getMailConfig,
+  getPrefs,
+  getTimesheet,
+  messageErreur,
+  patchPrefs,
+  testDigest,
+} from './api/client'
 import { Conges } from './pages/Conges'
 import { Tickets } from './pages/Tickets'
 import { Activite } from './pages/Activite'
@@ -13,7 +22,7 @@ import { fr } from 'date-fns/locale'
 import {
   ChevronDown, ChevronLeft, ChevronRight, Briefcase, Calendar, Info, Plus,
   Trash2, Save, AlertCircle, CheckCircle2, Loader2, User, LogOut, Lock, Key, Settings, Eye, EyeOff, Users, Layout, BarChart3,
-  Moon, Sun
+  Mail, Moon, Sun
 } from 'lucide-react'
 
 function App() {
@@ -46,6 +55,9 @@ function App() {
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
   const [showPassword, setShowPassword] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('scopa_theme') || 'light')
+  const [prefs, setPrefs] = useState(null)
+  const [mailConfig, setMailConfig] = useState(null)
+  const [mailStatus, setMailStatus] = useState(null)
   const [passForm, setPassForm] = useState({ old: '', new: '', confirm: '' })
   const [projectNameInput, setProjectNameInput] = useState("")
   const [projectCategoryInput, setProjectCategoryInput] = useState("Mission")
@@ -155,6 +167,46 @@ function App() {
       fetchAllCRAData();
     }
   }, [currentView, currentDate]);
+
+  // Préférences de notification, chargées à l'ouverture de l'onglet profil.
+  useEffect(() => {
+    if (!currentUser || currentView !== 'profile') return
+    getPrefs().then(setPrefs).catch(() => setPrefs(null))
+    if (currentUser.is_admin) {
+      getMailConfig().then(setMailConfig).catch(() => setMailConfig(null))
+    }
+  }, [currentUser, currentView])
+
+  const basculerPref = async (champ) => {
+    const precedent = prefs
+    const suivant = { ...prefs, [champ]: !prefs[champ] }
+    setPrefs(suivant)
+    try {
+      setPrefs(await patchPrefs({
+        daily_digest: suivant.daily_digest,
+        closing_reminder: suivant.closing_reminder,
+      }))
+    } catch (err) {
+      setPrefs(precedent)
+      setErrorMsg(messageErreur(err, "La préférence n'a pas été enregistrée"))
+    }
+  }
+
+  const envoyerEssai = async () => {
+    setMailStatus('Envoi…')
+    try {
+      const r = await testDigest()
+      setMailStatus(
+        r.status === 'sent'
+          ? `Envoyé à ${r.to}`
+          : r.status === 'dry_run'
+            ? "Essai à blanc : rien n'a été envoyé"
+            : 'Envoi désactivé (MAIL_ENABLED)',
+      )
+    } catch (err) {
+      setMailStatus(messageErreur(err, "L'envoi a échoué"))
+    }
+  }
 
   // Le theme se pose sur <html> : les tokens de theme.css basculent d'un bloc.
   useEffect(() => {
@@ -1045,6 +1097,56 @@ function App() {
     <main className="max-w-xl mx-auto p-12">
       <div className="bg-card rounded-[50px] p-16 shadow-2xl border-2 border-line-strong">
         <div className="text-center mb-10"><h2 className="text-4xl font-black uppercase tracking-tighter">{currentUser.full_name}</h2></div>
+        <h3 className="text-xl font-black uppercase mb-6 flex items-center gap-3"><Mail size={20} /> Notifications</h3>
+        {prefs && (
+          <div className="mb-10 flex flex-col gap-3">
+            {[
+              ['daily_digest', 'Récap matinal', "Du lundi au vendredi, s'il y a quelque chose à signaler"],
+              ['closing_reminder', 'Rappel de clôture', "En fin de mois, si le CRA n'est pas clôturé"],
+            ].map(([champ, titre, aide]) => (
+              <label key={champ} className="flex items-start gap-4 bg-input rounded-2xl p-5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={prefs[champ]}
+                  onChange={() => basculerPref(champ)}
+                  className="w-5 h-5 mt-0.5 accent-[var(--primary)]"
+                />
+                <span>
+                  <span className="block text-sm font-black">{titre}</span>
+                  <span className="block text-xs text-ink-muted mt-1 normal-case">{aide}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        {currentUser.is_admin && mailConfig && (
+          <div className="mb-10 bg-input rounded-2xl p-5 text-xs">
+            <p className="font-black uppercase tracking-widest text-ink-muted mb-2">Serveur d'envoi</p>
+            <p className="text-ink-muted normal-case">
+              {mailConfig.host || '— aucun hôte —'} · {mailConfig.sender}
+            </p>
+            <p className="mt-2 normal-case">
+              {!mailConfig.enabled
+                ? 'Envoi désactivé'
+                : mailConfig.dry_run
+                  ? 'Essai à blanc : les messages sont construits mais pas envoyés'
+                  : 'Envoi actif'}
+              {mailConfig.missing.length > 0 && (
+                <span className="text-danger"> — manque {mailConfig.missing.join(', ')}</span>
+              )}
+            </p>
+            <button
+              type="button"
+              onClick={envoyerEssai}
+              className="mt-4 px-5 py-2 rounded-2xl border-2 border-line font-black uppercase text-[10px] tracking-widest hover:border-primary"
+            >
+              M'envoyer un essai
+            </button>
+            {mailStatus && <p className="mt-2 text-ink-muted normal-case">{mailStatus}</p>}
+          </div>
+        )}
+
         <h3 className="text-xl font-black uppercase mb-8 flex items-center gap-3"><Lock size={20} /> Sécurité</h3>
         <form onSubmit={handlePassChange} className="space-y-6">
           <div className="space-y-2"><label className="text-[10px] font-black text-ink-muted tracking-widest uppercase ml-4">Ancien mot de passe</label><input type="password" value={passForm.old} onChange={e => setPassForm({ ...passForm, old: e.target.value })} className="w-full bg-input border-2 border-transparent focus:border-primary p-5 rounded-2xl outline-none font-black text-sm" /></div>

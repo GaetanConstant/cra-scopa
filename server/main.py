@@ -3,9 +3,10 @@ import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel, create_engine, Session, select
 from sqlalchemy.orm import selectinload
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import BackgroundTasks, FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials
@@ -15,6 +16,8 @@ from holidays import holidays_for_range
 from leaves import LeaveError, count_leave_days, daily_load, overlaps
 from positions import GAP, needs_rebalance, position_between, rebalance
 from reporting import summarise_user, to_csv, working_days_count
+import mail_content
+from mailer import MailConfig, MailError, send as envoyer_mail
 from timesheet import (
     TimesheetError,
     check_quantities,
@@ -250,6 +253,32 @@ class LeaveBalance(SQLModel, table=True):
     adjustment: float = 0.0  # reprise d'anteriorite, correction admin
 
 
+class NotificationPrefs(SQLModel, table=True):
+    """Ce que chacun accepte de recevoir. Tout est actif par defaut."""
+
+    user_id: int = Field(foreign_key="user.id", primary_key=True)
+    daily_digest: bool = True
+    closing_reminder: bool = True
+
+
+class EmailLog(SQLModel, table=True):
+    """Trace des envois.
+
+    La contrainte d'unicite (user_id, kind, ref_date) est le garde-fou des
+    jobs : relancer un timer deux fois le meme jour n'envoie qu'un message.
+    """
+
+    __table_args__ = (UniqueConstraint("user_id", "kind", "ref_date"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id")
+    kind: str
+    ref_date: str  # AAAA-MM-JJ ou AAAA-MM selon le type d'envoi
+    status: str
+    error: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
 class MonthClosure(SQLModel, table=True):
     """Cloture d'un mois pour un utilisateur.
 
@@ -433,6 +462,11 @@ class ReopenPeriod(BaseModel):
 class CopyWeek(BaseModel):
     target_week_start: date
     user_id: Optional[int] = None
+
+
+class PrefsUpdate(BaseModel):
+    daily_digest: bool
+    closing_reminder: bool
 
 
 class TicketCreate(BaseModel):
@@ -883,6 +917,7 @@ def read_leaves(
 @app.post("/leaves")
 def create_leave(
     req: LeaveCreate,
+    background: BackgroundTasks,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -954,6 +989,9 @@ def create_leave(
     session.add(demande)
     session.commit()
     session.refresh(demande)
+    # L'envoi ne doit pas faire echouer le depot : la demande est enregistree,
+    # c'est le mail qui peut rater, pas l'inverse.
+    background.add_task(notifier_demande_conge, demande.id)
     return demande_en_dict(demande)
 
 
@@ -961,6 +999,7 @@ def create_leave(
 def decide_leave(
     leave_id: int,
     req: LeaveDecision,
+    background: BackgroundTasks,
     session: Session = Depends(get_session),
     admin: User = Depends(require_admin),
 ):
@@ -980,6 +1019,7 @@ def decide_leave(
     session.add(demande)
     session.commit()
     session.refresh(demande)
+    background.add_task(notifier_decision_conge, demande.user_id, demande.id)
     return demande_en_dict(demande)
 
 
@@ -1132,6 +1172,195 @@ def read_team_calendar(
         }
         for d in demandes
     ]
+
+
+# --- Notifications --------------------------------------------------------
+
+
+def config_mail() -> MailConfig:
+    return MailConfig.from_env()
+
+
+def prefs_de(session: Session, user_id: int) -> NotificationPrefs:
+    """Preferences d'un utilisateur, creees a la demande avec les defauts."""
+    prefs = session.get(NotificationPrefs, user_id)
+    if prefs is None:
+        prefs = NotificationPrefs(user_id=user_id)
+        session.add(prefs)
+        session.commit()
+        session.refresh(prefs)
+    return prefs
+
+
+def envoyer_et_journaliser(
+    session: Session,
+    user_id: int,
+    destinataire: str,
+    kind: str,
+    ref_date: str,
+    contenu: dict,
+) -> str:
+    """Envoie un message et en garde la trace.
+
+    L'unicite (user_id, kind, ref_date) est verifiee avant l'envoi : c'est
+    elle qui rend les jobs rejouables sans doublon.
+    """
+    deja = session.exec(
+        select(EmailLog).where(
+            EmailLog.user_id == user_id,
+            EmailLog.kind == kind,
+            EmailLog.ref_date == ref_date,
+        )
+    ).first()
+    if deja is not None:
+        return "skipped"
+
+    config = config_mail()
+    statut, erreur = "sent", None
+    try:
+        statut = envoyer_mail(
+            config,
+            destinataire,
+            contenu["subject"],
+            contenu["text"],
+            contenu["html"],
+        )
+    except MailError as exc:
+        statut, erreur = "error", str(exc)
+        logger.error("Envoi %s a %s en echec : %s", kind, destinataire, exc)
+
+    session.add(
+        EmailLog(
+            user_id=user_id,
+            kind=kind,
+            ref_date=ref_date,
+            status=statut,
+            error=erreur,
+        )
+    )
+    session.commit()
+    return statut
+
+
+def notifier_decision_conge(user_id: int, leave_id: int) -> None:
+    """Prevenu le demandeur d'une decision. Appele hors requete HTTP."""
+    with Session(engine) as session:
+        demande = session.get(LeaveRequest, leave_id)
+        utilisateur = session.get(User, user_id)
+        if demande is None or utilisateur is None:
+            return
+        type_absence = session.get(LeaveType, demande.leave_type_id)
+        contenu = mail_content.leave_decision(
+            utilisateur.full_name,
+            type_absence.label if type_absence else "absence",
+            demande.start_date,
+            demande.end_date,
+            demande.days,
+            demande.status == "approved",
+            demande.decision_comment,
+            f"{config_mail().base_url}",
+        )
+        envoyer_et_journaliser(
+            session,
+            user_id,
+            utilisateur.email,
+            "leave_decision",
+            f"{leave_id}",
+            contenu,
+        )
+
+
+def notifier_demande_conge(leave_id: int) -> None:
+    """Previens les administrateurs qu'une demande attend."""
+    with Session(engine) as session:
+        demande = session.get(LeaveRequest, leave_id)
+        if demande is None:
+            return
+        demandeur = session.get(User, demande.user_id)
+        type_absence = session.get(LeaveType, demande.leave_type_id)
+        contenu = mail_content.leave_request_notice(
+            demandeur.full_name if demandeur else "Un consultant",
+            type_absence.label if type_absence else "absence",
+            demande.start_date,
+            demande.end_date,
+            demande.days,
+            f"{config_mail().base_url}",
+        )
+        for admin in session.exec(select(User).where(User.is_admin == True)).all():  # noqa: E712
+            envoyer_et_journaliser(
+                session,
+                admin.id,
+                admin.email,
+                "leave_request",
+                f"{leave_id}",
+                contenu,
+            )
+
+
+@app.get("/notifications/prefs")
+def read_prefs(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    return prefs_de(session, current_user.id).model_dump()
+
+
+@app.patch("/notifications/prefs")
+def update_prefs(
+    req: PrefsUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    prefs = prefs_de(session, current_user.id)
+    prefs.daily_digest = req.daily_digest
+    prefs.closing_reminder = req.closing_reminder
+    session.add(prefs)
+    session.commit()
+    session.refresh(prefs)
+    return prefs.model_dump()
+
+
+@app.get("/notifications/config")
+def read_mail_config(_admin: User = Depends(require_admin)):
+    """Etat de la configuration SMTP, sans jamais renvoyer le mot de passe."""
+    config = config_mail()
+    return {
+        "enabled": config.enabled,
+        "dry_run": config.dry_run,
+        "host": config.host,
+        "port": config.port,
+        "sender": config.sender,
+        "base_url": config.base_url,
+        "missing": config.manque(),
+    }
+
+
+@app.post("/notifications/digest/test")
+def test_digest(
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_admin),
+):
+    """Envoie un recap d'essai a l'administrateur qui le demande.
+
+    Hors journal d'envoi : un essai ne doit pas consommer la cle d'unicite
+    du recap du jour, sinon le vrai ne partirait plus.
+    """
+    contenu = mail_content.digest(
+        admin.full_name,
+        {"Essai": ["Ceci est un envoi de verification depuis le CRA SCOPA."]},
+        config_mail().base_url,
+    )
+    try:
+        statut = envoyer_mail(
+            config_mail(),
+            admin.email,
+            contenu["subject"],
+            contenu["text"],
+            contenu["html"],
+        )
+    except MailError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"status": statut, "to": admin.email}
 
 
 # --- Activite ------------------------------------------------------------
