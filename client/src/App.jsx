@@ -306,32 +306,32 @@ function App() {
   }, [daysInMonth, gridData]);
 
   const renderHeader = () => (
-    <header className="bg-white border-b-2 border-black/5 p-6 flex items-center justify-between sticky top-0 z-50">
+    <header className="bg-card border-b-2 border-line p-6 flex items-center justify-between sticky top-0 z-50">
       <div className="flex items-center gap-3">
-        <div className="bg-[#6186EA] w-12 h-12 rounded-lg flex items-center justify-center -rotate-2">
-          <span className="text-white font-black text-2xl">S</span>
+        <div className="bg-primary w-12 h-12 rounded-lg flex items-center justify-center -rotate-2">
+          <span className="text-on-primary font-black text-2xl">S</span>
         </div>
         <div className="cursor-pointer" onClick={() => currentUser && setCurrentView('cra')}>
           <h1 className="text-2xl font-black leading-tight tracking-tighter">SCOPA</h1>
-          <p className="text-[10px] font-bold text-gray-400 tracking-widest uppercase">Les artisans de la donnée</p>
+          <p className="text-[10px] font-bold text-ink-muted tracking-widest uppercase">Les artisans de la donnée</p>
         </div>
       </div>
 
       {currentUser && (
         <div className="flex items-center gap-8">
           <nav className="flex items-center gap-6 font-black text-xs tracking-widest uppercase">
-            <button onClick={() => setCurrentView('cra')} className={`transition-all ${currentView === 'cra' ? 'text-[#6186EA]' : 'opacity-30'}`}>Mon CRA</button>
+            <button onClick={() => setCurrentView('cra')} className={`transition-all ${currentView === 'cra' ? 'text-primary' : 'opacity-30'}`}>Mon CRA</button>
             {currentUser.is_admin && (
               <>
-                <button onClick={() => setCurrentView('projects')} className={`transition-all ${currentView === 'projects' ? 'text-[#6186EA]' : 'opacity-30'}`}>Projets</button>
-                <button onClick={() => setCurrentView('admin_cra')} className={`transition-all ${currentView === 'admin_cra' ? 'text-[#6186EA]' : 'opacity-30'}`}>Revues CRA</button>
-                <button onClick={() => setCurrentView('admin_global')} className={`transition-all ${currentView === 'admin_global' ? 'text-[#6186EA]' : 'opacity-30'}`}>Bilan Global</button>
-                <button onClick={() => setCurrentView('admin_users')} className={`transition-all ${currentView === 'admin_users' ? 'text-[#6186EA]' : 'opacity-30'}`}>Collaborateurs</button>
+                <button onClick={() => setCurrentView('projects')} className={`transition-all ${currentView === 'projects' ? 'text-primary' : 'opacity-30'}`}>Projets</button>
+                <button onClick={() => setCurrentView('admin_cra')} className={`transition-all ${currentView === 'admin_cra' ? 'text-primary' : 'opacity-30'}`}>Revues CRA</button>
+                <button onClick={() => setCurrentView('admin_global')} className={`transition-all ${currentView === 'admin_global' ? 'text-primary' : 'opacity-30'}`}>Bilan Global</button>
+                <button onClick={() => setCurrentView('admin_users')} className={`transition-all ${currentView === 'admin_users' ? 'text-primary' : 'opacity-30'}`}>Collaborateurs</button>
               </>
             )}
           </nav>
           <div className="border-l pl-6 flex items-center gap-4">
-            <div onClick={() => setCurrentView('profile')} className={`cursor-pointer group flex items-center gap-2 px-3 py-1 rounded-xl transition-all ${currentView === 'profile' ? 'bg-black text-white' : 'hover:bg-gray-100'}`}>
+            <div onClick={() => setCurrentView('profile')} className={`cursor-pointer group flex items-center gap-2 px-3 py-1 rounded-xl transition-all ${currentView === 'profile' ? 'bg-inverse text-on-inverse' : 'hover:bg-hovered'}`}>
               <p className="text-[10px] font-black uppercase leading-none">{currentUser.full_name}</p>
               <User size={14} />
             </div>
@@ -342,7 +342,7 @@ function App() {
             >
               {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
             </button>
-            <button onClick={handleLogout} className="text-gray-300 hover:text-red-500"><LogOut size={16} /></button>
+            <button onClick={handleLogout} className="text-ink-subtle hover:text-danger"><LogOut size={16} /></button>
           </div>
         </div>
       )}
@@ -446,19 +446,19 @@ function App() {
             <h2 className="text-5xl font-black uppercase tracking-tighter mb-4">Mon activité</h2>
             <div className="flex items-center gap-6">
               <div className="flex flex-col gap-2">
-                <div className="flex items-center bg-white rounded-2xl p-2 shadow-sm border border-black/5">
-                  <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-gray-100 p-2 rounded-xl transition-all"><ChevronLeft size={20} /></button>
+                <div className="flex items-center bg-card rounded-2xl p-2 shadow-sm border border-line">
+                  <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-hovered p-2 rounded-xl transition-all"><ChevronLeft size={20} /></button>
                   <span className="px-6 font-black text-sm uppercase tracking-widest min-w-[180px] text-center">{format(currentDate, 'MMMM yyyy', { locale: fr })}</span>
-                  <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="hover:bg-gray-100 p-2 rounded-xl transition-all"><ChevronRight size={20} /></button>
+                  <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="hover:bg-hovered p-2 rounded-xl transition-all"><ChevronRight size={20} /></button>
                 </div>
                 <div className="px-4 flex items-center gap-2">
-                  <div className="h-1.5 flex-1 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="h-1.5 flex-1 bg-track rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-[#6186EA] transition-all duration-500"
+                      className="h-full bg-primary transition-all duration-500"
                       style={{ width: `${Math.min(100, (monthStats.totalEntered / monthStats.workingDays) * 100)}%` }}
                     ></div>
                   </div>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 whitespace-nowrap">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-ink-muted whitespace-nowrap">
                     {monthStats.totalEntered.toFixed(1)} / {monthStats.workingDays} UNITÉS
                   </span>
                 </div>
@@ -470,48 +470,48 @@ function App() {
                     const p = (currentUser.is_admin ? projects : userProjects).find(proj => proj.id === parseInt(pid));
                     addRow(p.category, p.id); e.target.value = "";
                   }}
-                  className="bg-white border-2 border-black/5 rounded-2xl px-6 py-3 font-black uppercase text-[10px] cursor-pointer"
+                  className="bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] cursor-pointer"
                 >
                   <option value="">+ Ajouter un projet</option>
                   {(currentUser.is_admin ? projects : userProjects).map(p => <option key={p.id} value={p.id}>{p.name} ({p.category})</option>)}
                 </select>
-                <button onClick={() => addRow('Absence')} className="bg-white border-2 border-black/5 rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-red-500 transition-all">+ Absence</button>
-                <button onClick={() => addRow('Formation')} className="bg-white border-2 border-black/5 rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-amber-500 transition-all">+ Formation</button>
-                <button onClick={() => addRow('Férié')} className="bg-white border-2 border-black/5 rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-green-500 transition-all">+ Férié</button>
+                <button onClick={() => addRow('Absence')} className="bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-danger transition-all">+ Absence</button>
+                <button onClick={() => addRow('Formation')} className="bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-warning transition-all">+ Formation</button>
+                <button onClick={() => addRow('Férié')} className="bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-success transition-all">+ Férié</button>
               </div>
             </div>
           </div>
-          <button onClick={saveCRA} disabled={loading} className={`flex items-center gap-3 px-10 py-5 rounded-3xl font-black uppercase text-sm transition-all shadow-xl ${saveStatus === 'success' ? 'bg-green-500 text-white' : 'bg-[#6186EA] text-white hover:scale-105 hover:shadow-2xl'}`}>
+          <button onClick={saveCRA} disabled={loading} className={`flex items-center gap-3 px-10 py-5 rounded-3xl font-black uppercase text-sm transition-all shadow-xl ${saveStatus === 'success' ? 'bg-success text-on-primary' : 'bg-primary text-on-primary hover:scale-105 hover:shadow-2xl'}`}>
             {loading ? <Loader2 className="animate-spin" size={20} /> : (saveStatus === 'success' ? <CheckCircle2 size={20} /> : <Save size={20} />)}
             {saveStatus === 'success' ? 'Enregistré' : 'Sauvegarder'}
           </button>
         </div>
 
-        <div className="bg-white rounded-[40px] shadow-2xl border border-black/5 overflow-x-auto custom-scrollbar">
+        <div className="bg-card rounded-[40px] shadow-2xl border border-line overflow-x-auto custom-scrollbar">
           <table className="w-full border-collapse min-w-[1500px]">
             <thead>
-              <tr className="bg-gray-50/50">
-                <th className="sticky left-0 z-20 bg-gray-50 p-6 text-left border-b-2 border-black/5 min-w-[300px] shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)] text-[10px] font-black uppercase text-gray-400">Projets / Activités</th>
+              <tr className="bg-input">
+                <th className="sticky left-0 z-20 bg-input p-6 text-left border-b-2 border-line min-w-[300px] shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)] text-[10px] font-black uppercase text-ink-muted">Projets / Activités</th>
                 {daysInMonth.map(day => (
-                  <th key={format(day, 'yyyy-MM-dd')} className={`p-4 border-b-2 border-black/5 min-w-[50px] ${getDay(day) === 0 || getDay(day) === 6 ? 'bg-gray-100/50 opacity-40' : ''}`}>
+                  <th key={format(day, 'yyyy-MM-dd')} className={`p-4 border-b-2 border-line min-w-[50px] ${getDay(day) === 0 || getDay(day) === 6 ? 'bg-hovered opacity-40' : ''}`}>
                     <div className="flex flex-col items-center">
                       <span className="text-[10px] font-black uppercase tracking-tighter mb-1">{format(day, 'EEE', { locale: fr })}</span>
                       <span className="text-lg font-black">{format(day, 'd')}</span>
                     </div>
                   </th>
                 ))}
-                <th className="p-6 border-b-2 border-black/5 font-black text-[10px] uppercase text-gray-400">Total</th>
+                <th className="p-6 border-b-2 border-line font-black text-[10px] uppercase text-ink-muted">Total</th>
               </tr>
             </thead>
             <tbody>
               {activeRows.map(row => {
                 let totalRow = 0;
                 return (
-                  <tr key={row.key} className="hover:bg-gray-50/30 transition-all border-b border-black/5 group text-sm font-black uppercase">
-                    <td className="sticky left-0 z-10 bg-white p-6 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)] group-hover:bg-gray-50">
+                  <tr key={row.key} className="hover:bg-input transition-all border-b border-line group text-sm font-black uppercase">
+                    <td className="sticky left-0 z-10 bg-card p-6 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)] group-hover:bg-input">
                       <div className="flex items-center justify-between">
                         <span>{row.project_id ? (projects.find(p => p.id === row.project_id)?.name || userProjects.find(p => p.id === row.project_id)?.name || 'Projet') : row.activity_type}</span>
-                        <button onClick={() => removeRow(row.key)} className="text-gray-100 group-hover:text-red-500"><Trash2 size={14} /></button>
+                        <button onClick={() => removeRow(row.key)} className="text-ink-subtle group-hover:text-danger"><Trash2 size={14} /></button>
                       </div>
                     </td>
                     {daysInMonth.map(day => {
@@ -519,7 +519,7 @@ function App() {
                       const val = gridData[row.key]?.[dateStr] || 0;
                       if (val > 0) totalRow += val;
                       return (
-                        <td key={dateStr} className={`p-2 border-r border-black/5 ${getDay(day) === 0 || getDay(day) === 6 ? 'bg-gray-50/50 opacity-30 grayscale' : ''}`}>
+                        <td key={dateStr} className={`p-2 border-r border-line ${getDay(day) === 0 || getDay(day) === 6 ? 'bg-input opacity-30 grayscale' : ''}`}>
                           {getDay(day) !== 0 && getDay(day) !== 6 && (
                             <input
                               type="text"
@@ -535,31 +535,31 @@ function App() {
                                 updateCell(row.key, dateStr, v === "" ? "" : v);
                                 setDraftCell({ key: null, date: null, value: "" });
                               }}
-                              className={`w-full h-12 text-center font-black rounded-xl outline-none transition-all ${val > 0 ? 'bg-[#6186EA] text-white' : 'bg-transparent hover:bg-gray-100'}`}
+                              className={`w-full h-12 text-center font-black rounded-xl outline-none transition-all ${val > 0 ? 'bg-primary text-on-primary' : 'bg-transparent hover:bg-hovered'}`}
                             />
                           )}
                         </td>
                       );
                     })}
-                    <td className="p-6 text-center bg-gray-50/50">{totalRow.toFixed(1)}</td>
+                    <td className="p-6 text-center bg-input">{totalRow.toFixed(1)}</td>
                   </tr>
                 );
               })}
             </tbody>
             <tfoot>
-              <tr className="bg-black/5 text-[10px] font-black uppercase">
-                <td className="p-6 text-right sticky left-0 z-10 bg-gray-200 shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)]">Charge Totale</td>
+              <tr className="bg-hovered text-[10px] font-black uppercase">
+                <td className="p-6 text-right sticky left-0 z-10 bg-track shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)]">Charge Totale</td>
                 {daysInMonth.map(day => {
                   const total = getDayTotal(format(day, 'yyyy-MM-dd'));
                   return (
                     <td key={format(day, 'yyyy-MM-dd')} className={`p-4 text-center ${getDay(day) === 0 || getDay(day) === 6 ? 'opacity-20' : ''}`}>
                       {getDay(day) !== 0 && getDay(day) !== 6 && (
-                        <div className={`px-2 py-1 rounded-lg ${total > 1 ? 'bg-amber-400 text-white' : total === 1 ? 'text-[#6186EA]' : 'text-gray-400'}`}>{total.toFixed(1)}</div>
+                        <div className={`px-2 py-1 rounded-lg ${total > 1 ? 'bg-interne text-on-primary' : total === 1 ? 'text-primary' : 'text-ink-muted'}`}>{total.toFixed(1)}</div>
                       )}
                     </td>
                   );
                 })}
-                <td className="bg-black/10"></td>
+                <td className="bg-track"></td>
               </tr>
             </tfoot>
           </table>
@@ -579,45 +579,45 @@ function App() {
               const entries = await fetchCRA(u.id);
               setSelectedReviewUser({ ...u, entries });
             }}
-            className={`bg-white p-6 rounded-3xl border-2 transition-all cursor-pointer hover:scale-[1.02] ${selectedReviewUser?.id === u.id ? 'border-[#6186EA]' : 'border-transparent shadow-sm'}`}
+            className={`bg-card p-6 rounded-3xl border-2 transition-all cursor-pointer hover:scale-[1.02] ${selectedReviewUser?.id === u.id ? 'border-primary' : 'border-transparent shadow-sm'}`}
           >
             <p className="text-xs font-black uppercase">{u.full_name}</p>
-            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest leading-none mt-1">@{u.username}</p>
+            <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest leading-none mt-1">@{u.username}</p>
           </div>
         ))}
       </div>
 
       {selectedReviewUser && (
-        <div className="bg-white rounded-[40px] p-10 border-2 border-black animate-in slide-in-from-bottom-5 duration-500 shadow-2xl">
+        <div className="bg-card rounded-[40px] p-10 border-2 border-line-strong animate-in slide-in-from-bottom-5 duration-500 shadow-2xl">
           <div className="flex justify-between items-center mb-10">
             <h3 className="text-3xl font-black uppercase tracking-tighter">Fiche de {selectedReviewUser.full_name}</h3>
-            <div className="flex items-center bg-[#6186EA]/10 rounded-2xl p-1 border border-[#6186EA]/20 shadow-sm transition-all hover:bg-[#6186EA]/15">
-              <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-[#6186EA]/20 p-2 rounded-xl transition-all text-[#6186EA]"><ChevronLeft size={16} /></button>
-              <span className="px-6 font-black text-xs uppercase tracking-widest text-[#6186EA] min-w-[150px] text-center">{format(currentDate, 'MMMM yyyy', { locale: fr })}</span>
-              <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="hover:bg-[#6186EA]/20 p-2 rounded-xl transition-all text-[#6186EA]"><ChevronRight size={16} /></button>
+            <div className="flex items-center bg-primary-soft rounded-2xl p-1 border border-primary-soft shadow-sm transition-all hover:bg-primary-soft">
+              <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-primary-soft p-2 rounded-xl transition-all text-primary"><ChevronLeft size={16} /></button>
+              <span className="px-6 font-black text-xs uppercase tracking-widest text-primary min-w-[150px] text-center">{format(currentDate, 'MMMM yyyy', { locale: fr })}</span>
+              <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="hover:bg-primary-soft p-2 rounded-xl transition-all text-primary"><ChevronRight size={16} /></button>
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-6 mb-12">
             {[
-              { label: 'Missions', type: 'Mission', color: 'bg-blue-500', icon: Briefcase },
-              { label: 'Formations', type: 'Formation', color: 'bg-amber-400', icon: Calendar },
-              { label: 'Interne', type: 'Interne', color: 'bg-indigo-500', icon: Layout },
-              { label: 'Absences', type: 'Absence', color: 'bg-red-500', icon: AlertCircle },
-              { label: 'Fériés', type: 'Férié', color: 'bg-green-500', icon: Calendar },
+              { label: 'Missions', type: 'Mission', color: 'bg-formation', icon: Briefcase },
+              { label: 'Formations', type: 'Formation', color: 'bg-interne', icon: Calendar },
+              { label: 'Interne', type: 'Interne', color: 'bg-mission', icon: Layout },
+              { label: 'Absences', type: 'Absence', color: 'bg-danger', icon: AlertCircle },
+              { label: 'Fériés', type: 'Férié', color: 'bg-success', icon: Calendar },
             ].map(stat => {
               const total = selectedReviewUser.entries
                 .filter(e => e.activity_type === stat.type)
                 .reduce((sum, e) => sum + e.duration_factor, 0);
               return (
-                <div key={stat.type} className="bg-gray-50 rounded-3xl p-6 border-2 border-transparent hover:border-black/5 transition-all">
+                <div key={stat.type} className="bg-input rounded-3xl p-6 border-2 border-transparent hover:border-line transition-all">
                   <div className="flex items-center gap-4 mb-2">
-                    <div className={`${stat.color} p-2 rounded-xl text-white`}><stat.icon size={18} /></div>
-                    <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">{stat.label}</span>
+                    <div className={`${stat.color} p-2 rounded-xl text-on-primary`}><stat.icon size={18} /></div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-ink-muted">{stat.label}</span>
                   </div>
                   <div className="flex items-baseline gap-2">
                     <span className="text-4xl font-black tracking-tighter">{total.toFixed(1)}</span>
-                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest text-right w-full">Jours</span>
+                    <span className="text-xs font-bold text-ink-muted uppercase tracking-widest text-right w-full">Jours</span>
                   </div>
                 </div>
               );
@@ -627,7 +627,7 @@ function App() {
           <div className="overflow-x-auto custom-scrollbar">
             <table className="w-full border-collapse text-[10px] font-black uppercase min-w-[1000px]">
               <thead>
-                <tr className="bg-gray-50 border-b border-black/5">
+                <tr className="bg-input border-b border-line">
                   <th className="p-4 text-left min-w-[150px]">Activité</th>
                   {daysInMonth.map(d => (
                     <th key={format(d, 'd')} className={`p-2 w-8 ${getDay(d) === 0 || getDay(d) === 6 ? 'opacity-20' : ''}`}>{format(d, 'd')}</th>
@@ -641,13 +641,13 @@ function App() {
                   const projectName = entry?.project_id ? projects.find(p => p.id === entry.project_id)?.name : null;
                   const activityType = entry?.activity_type;
                   return (
-                    <tr key={rowKey} className="border-b border-black/5">
+                    <tr key={rowKey} className="border-b border-line">
                       <td className="p-4">{projectName || activityType}</td>
                       {daysInMonth.map(day => {
                         const entry = selectedReviewUser.entries.find(e => isSameDay(parseISO(e.date), day) && (e.project_id ? `P-${e.project_id}` : `A-${e.activity_type}`) === rowKey);
                         return (
                           <td key={format(day, 'd')} className={`p-2 text-center text-[8px] ${getDay(day) === 0 || getDay(day) === 6 ? 'opacity-20' : ''}`}>
-                            {entry ? <span className="bg-[#6186EA] text-white px-1.5 py-0.5 rounded-sm">{entry.duration_factor}</span> : '-'}
+                            {entry ? <span className="bg-primary text-on-primary px-1.5 py-0.5 rounded-sm">{entry.duration_factor}</span> : '-'}
                           </td>
                         )
                       })}
@@ -667,29 +667,29 @@ function App() {
       <div className="flex items-center justify-between mb-10">
         <div>
           <h2 className="text-5xl font-black uppercase tracking-tighter mb-2">Bilan Global</h2>
-          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Activité consolidée de l'agence</p>
+          <p className="text-[10px] font-black text-ink-muted uppercase tracking-widest">Activité consolidée de l'agence</p>
         </div>
-        <div className="flex items-center bg-white rounded-3xl p-2 border-2 border-black/5 shadow-sm">
-          <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-gray-100 p-3 rounded-2xl transition-all text-black"><ChevronLeft size={20} /></button>
+        <div className="flex items-center bg-card rounded-3xl p-2 border-2 border-line shadow-sm">
+          <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-hovered p-3 rounded-2xl transition-all text-ink"><ChevronLeft size={20} /></button>
           <span className="px-8 font-black text-sm uppercase tracking-[0.2em] min-w-[200px] text-center">{format(currentDate, 'MMMM yyyy', { locale: fr })}</span>
-          <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="hover:bg-gray-100 p-3 rounded-2xl transition-all text-black"><ChevronRight size={20} /></button>
+          <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="hover:bg-hovered p-3 rounded-2xl transition-all text-ink"><ChevronRight size={20} /></button>
         </div>
       </div>
 
-      <div className="bg-white rounded-[40px] shadow-2xl border-2 border-black overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-700">
+      <div className="bg-card rounded-[40px] shadow-2xl border-2 border-line-strong overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-700">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="bg-black text-white">
+            <tr className="bg-inverse text-on-inverse">
               <th className="p-8 text-left text-[10px] font-black uppercase tracking-widest">Collaborateur</th>
-              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-blue-500">Missions</th>
-              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-amber-400">Formations</th>
-              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-indigo-500">Interne</th>
-              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-red-500">Absences</th>
-              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-green-500">Fériés</th>
-              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-gray-900 border-l border-white/20">Total Actif</th>
+              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-formation">Missions</th>
+              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-interne">Formations</th>
+              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-mission">Interne</th>
+              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-danger">Absences</th>
+              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-success">Fériés</th>
+              <th className="p-8 text-center text-[10px] font-black uppercase tracking-widest bg-inverse text-on-inverse border-l border-line-inverse">Total Actif</th>
             </tr>
           </thead>
-          <tbody className="divide-y-2 divide-gray-50">
+          <tbody className="divide-y-2 divide-line">
             {allUsers.map(user => {
               const userEntries = allCRAData.filter(e => e.user_id === user.id);
               const getSum = (type) => userEntries.filter(e => e.activity_type === type).reduce((s, e) => s + e.duration_factor, 0);
@@ -702,33 +702,33 @@ function App() {
               const total = mission + formation + interne;
 
               return (
-                <tr key={user.id} className="hover:bg-gray-50/80 transition-all font-black group">
+                <tr key={user.id} className="hover:bg-input transition-all font-black group">
                   <td className="p-8">
                     <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-400 group-hover:bg-black group-hover:text-white transition-all duration-300">
-                        {user.is_admin ? <Lock size={20} className="text-amber-500" /> : <User size={20} />}
+                      <div className="w-12 h-12 rounded-2xl bg-hovered flex items-center justify-center text-ink-muted group-hover:bg-inverse group-hover:text-on-inverse transition-all duration-300">
+                        {user.is_admin ? <Lock size={20} className="text-warning" /> : <User size={20} />}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
                           <p className="uppercase text-sm tracking-tight">{user.full_name}</p>
-                          {user.is_admin && <span className="bg-black text-white text-[7px] px-1.5 py-0.5 rounded-full">ADMIN</span>}
+                          {user.is_admin && <span className="bg-inverse text-on-inverse text-[7px] px-1.5 py-0.5 rounded-full">ADMIN</span>}
                         </div>
-                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">@{user.username}</p>
+                        <p className="text-[10px] text-ink-muted font-bold uppercase tracking-widest">@{user.username}</p>
                       </div>
                     </div>
                   </td>
-                  <td className="p-8 text-center text-xl tracking-tighter text-blue-600">{mission.toFixed(1)}</td>
-                  <td className="p-8 text-center text-xl tracking-tighter text-amber-500">{formation.toFixed(1)}</td>
-                  <td className="p-8 text-center text-xl tracking-tighter text-indigo-600">{interne.toFixed(1)}</td>
-                  <td className="p-8 text-center text-xl tracking-tighter text-red-500">{absence.toFixed(1)}</td>
-                  <td className="p-8 text-center text-xl tracking-tighter text-green-600">{conge.toFixed(1)}</td>
-                  <td className="p-8 text-center text-xl tracking-tighter bg-gray-50/50 border-l border-gray-100">{total.toFixed(1)}</td>
+                  <td className="p-8 text-center text-xl tracking-tighter text-formation">{mission.toFixed(1)}</td>
+                  <td className="p-8 text-center text-xl tracking-tighter text-warning">{formation.toFixed(1)}</td>
+                  <td className="p-8 text-center text-xl tracking-tighter text-mission">{interne.toFixed(1)}</td>
+                  <td className="p-8 text-center text-xl tracking-tighter text-danger">{absence.toFixed(1)}</td>
+                  <td className="p-8 text-center text-xl tracking-tighter text-success">{conge.toFixed(1)}</td>
+                  <td className="p-8 text-center text-xl tracking-tighter bg-input border-l border-line">{total.toFixed(1)}</td>
                 </tr>
               );
             })}
           </tbody>
           <tfoot>
-            <tr className="bg-gray-50 font-black border-t-4 border-black">
+            <tr className="bg-input font-black border-t-4 border-line-strong">
               <td className="p-8 uppercase text-[10px] tracking-widest">Total Agence</td>
               <td className="p-8 text-center text-2xl tracking-tighter">
                 {allCRAData.filter(e => e.activity_type === 'Mission').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
@@ -745,7 +745,7 @@ function App() {
               <td className="p-8 text-center text-2xl tracking-tighter">
                 {allCRAData.filter(e => e.activity_type === 'Férié').reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
               </td>
-              <td className="p-8 text-center text-2xl bg-black text-white">
+              <td className="p-8 text-center text-2xl bg-inverse text-on-inverse">
                 {allCRAData.filter(e => ['Mission', 'Formation', 'Interne'].includes(e.activity_type)).reduce((s, e) => s + e.duration_factor, 0).toFixed(1)}
               </td>
             </tr>
@@ -761,7 +761,7 @@ function App() {
         {editingUser ? 'Modifier le Collaborateur' : 'Gestion Collaborateurs'}
       </h2>
 
-      <div className="bg-white rounded-[40px] p-10 border-2 border-black shadow-2xl mb-12">
+      <div className="bg-card rounded-[40px] p-10 border-2 border-line-strong shadow-2xl mb-12">
         <form onSubmit={async (e) => {
           e.preventDefault();
           const payload = {
@@ -785,23 +785,23 @@ function App() {
           }
         }} className="space-y-6">
           <div className="grid grid-cols-2 gap-4">
-            <input type="text" value={userForm.fullName} onChange={e => setUserForm({ ...userForm, fullName: e.target.value })} placeholder="NOM COMPLET" className="bg-gray-50 border-2 border-transparent focus:border-[#6186EA] p-5 rounded-2xl outline-none font-black text-sm uppercase" />
-            <input type="text" value={userForm.username} onChange={e => setUserForm({ ...userForm, username: e.target.value })} placeholder="NOM D'UTILISATEUR" className="bg-gray-50 border-2 border-transparent focus:border-[#6186EA] p-5 rounded-2xl outline-none font-black text-sm uppercase" />
+            <input type="text" value={userForm.fullName} onChange={e => setUserForm({ ...userForm, fullName: e.target.value })} placeholder="NOM COMPLET" className="bg-input border-2 border-transparent focus:border-primary p-5 rounded-2xl outline-none font-black text-sm uppercase" />
+            <input type="text" value={userForm.username} onChange={e => setUserForm({ ...userForm, username: e.target.value })} placeholder="NOM D'UTILISATEUR" className="bg-input border-2 border-transparent focus:border-primary p-5 rounded-2xl outline-none font-black text-sm uppercase" />
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <input type="email" value={userForm.email} onChange={e => setUserForm({ ...userForm, email: e.target.value })} placeholder="EMAIL" className="bg-gray-50 border-2 border-transparent focus:border-[#6186EA] p-5 rounded-2xl outline-none font-black text-sm uppercase" />
-            <input type="password" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} placeholder={editingUser ? "NOUVEAU MOT DE PASSE (OPTIONNEL)" : "MOT DE PASSE"} className="bg-gray-50 border-2 border-transparent focus:border-[#6186EA] p-5 rounded-2xl outline-none font-black text-sm uppercase" />
+            <input type="email" value={userForm.email} onChange={e => setUserForm({ ...userForm, email: e.target.value })} placeholder="EMAIL" className="bg-input border-2 border-transparent focus:border-primary p-5 rounded-2xl outline-none font-black text-sm uppercase" />
+            <input type="password" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} placeholder={editingUser ? "NOUVEAU MOT DE PASSE (OPTIONNEL)" : "MOT DE PASSE"} className="bg-input border-2 border-transparent focus:border-primary p-5 rounded-2xl outline-none font-black text-sm uppercase" />
           </div>
           <div className="flex items-center gap-4">
             <label className="flex items-center gap-3 cursor-pointer">
-              <input type="checkbox" checked={userForm.isAdmin} onChange={e => setUserForm({ ...userForm, isAdmin: e.target.checked })} className="w-5 h-5 accent-[#6186EA]" />
-              <span className="text-xs font-black uppercase text-gray-500">Droits Administrateur</span>
+              <input type="checkbox" checked={userForm.isAdmin} onChange={e => setUserForm({ ...userForm, isAdmin: e.target.checked })} className="w-5 h-5 accent-[var(--primary)]" />
+              <span className="text-xs font-black uppercase text-ink-muted">Droits Administrateur</span>
             </label>
             <div className="flex-1"></div>
             {editingUser && (
-              <button type="button" onClick={() => { setEditingUser(null); setUserForm({ fullName: '', username: '', email: '', isAdmin: false, password: '' }); }} className="bg-gray-100 text-black px-8 py-4 rounded-2xl font-black uppercase text-xs">Annuler</button>
+              <button type="button" onClick={() => { setEditingUser(null); setUserForm({ fullName: '', username: '', email: '', isAdmin: false, password: '' }); }} className="bg-hovered text-ink px-8 py-4 rounded-2xl font-black uppercase text-xs">Annuler</button>
             )}
-            <button type="submit" className="bg-[#6186EA] text-white px-10 py-4 rounded-2xl font-black uppercase text-xs">
+            <button type="submit" className="bg-primary text-on-primary px-10 py-4 rounded-2xl font-black uppercase text-xs">
               {editingUser ? 'Enregistrer' : 'Créer le collaborateur'}
             </button>
           </div>
@@ -810,33 +810,33 @@ function App() {
 
       <div className="grid gap-6">
         {allUsers.map(u => (
-          <div key={u.id} className={`bg-white p-10 rounded-[40px] shadow-sm border-2 transition-all ${editingUser?.id === u.id ? 'border-[#6186EA]' : 'border-black/5'}`}>
+          <div key={u.id} className={`bg-card p-10 rounded-[40px] shadow-sm border-2 transition-all ${editingUser?.id === u.id ? 'border-primary' : 'border-line'}`}>
             <div className="flex justify-between items-start mb-10">
               <div>
                 <div className="flex items-center gap-3">
                   <h4 className="text-2xl font-black uppercase tracking-tighter">{u.full_name}</h4>
-                  {u.is_admin && <span className="bg-black text-white text-[8px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest">ADMIN</span>}
+                  {u.is_admin && <span className="bg-inverse text-on-inverse text-[8px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest">ADMIN</span>}
                 </div>
-                <p className="text-xs text-gray-400 font-black tracking-widest mt-1">@{u.username} • {u.email}</p>
+                <p className="text-xs text-ink-muted font-black tracking-widest mt-1">@{u.username} • {u.email}</p>
               </div>
               <button
                 onClick={() => {
                   setEditingUser(u);
                   setUserForm({ fullName: u.full_name, username: u.username, email: u.email, isAdmin: u.is_admin, password: '' });
                 }}
-                className="p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-all text-gray-400 hover:text-black"
+                className="p-3 bg-input rounded-xl hover:bg-hovered transition-all text-ink-muted hover:text-ink"
               >
                 <Settings size={18} />
               </button>
             </div>
 
             <div>
-              <h5 className="text-[10px] font-black uppercase tracking-widest mb-6 text-gray-400">Projets Associés</h5>
+              <h5 className="text-[10px] font-black uppercase tracking-widest mb-6 text-ink-muted">Projets Associés</h5>
               <div className="grid grid-cols-3 gap-4">
                 {projects.map(p => {
                   const isAssigned = (u.projects || []).some(up => up.id === p.id);
                   return (
-                    <label key={p.id} className={`flex items-center gap-3 p-4 bg-gray-50 rounded-2xl cursor-pointer hover:bg-gray-100 transition-all border-2 ${isAssigned ? 'border-[#6186EA]' : 'border-transparent'}`}>
+                    <label key={p.id} className={`flex items-center gap-3 p-4 bg-input rounded-2xl cursor-pointer hover:bg-hovered transition-all border-2 ${isAssigned ? 'border-primary' : 'border-transparent'}`}>
                       <input
                         type="checkbox"
                         className="hidden"
@@ -862,8 +862,8 @@ function App() {
                           }
                         }}
                       />
-                      <Briefcase size={14} className={isAssigned ? "text-[#6186EA]" : "text-gray-300"} />
-                      <span className="text-[10px] font-black uppercase text-gray-700">{p.name}</span>
+                      <Briefcase size={14} className={isAssigned ? "text-primary" : "text-ink-subtle"} />
+                      <span className="text-[10px] font-black uppercase text-ink">{p.name}</span>
                     </label>
                   )
                 })}
@@ -880,7 +880,7 @@ function App() {
       <h2 className="text-5xl font-black uppercase tracking-tighter mb-10">
         {editingProject ? 'Modifier le projet' : 'Gestion Projets'}
       </h2>
-      <div className="bg-white rounded-[40px] p-10 border-2 border-black shadow-2xl mb-12">
+      <div className="bg-card rounded-[40px] p-10 border-2 border-line-strong shadow-2xl mb-12">
         <form onSubmit={async (e) => {
           e.preventDefault(); if (!projectNameInput) return;
           if (editingProject) {
@@ -892,12 +892,12 @@ function App() {
           setEditingProject(null);
           fetchProjects();
         }} className="space-y-6">
-          <input type="text" value={projectNameInput} onChange={e => setProjectNameInput(e.target.value)} placeholder="NOM DU PROJET" className="w-full bg-gray-50 border-2 border-transparent focus:border-[#6186EA] p-5 rounded-3xl outline-none font-black text-sm uppercase" />
+          <input type="text" value={projectNameInput} onChange={e => setProjectNameInput(e.target.value)} placeholder="NOM DU PROJET" className="w-full bg-input border-2 border-transparent focus:border-primary p-5 rounded-3xl outline-none font-black text-sm uppercase" />
           <div className="flex gap-4">
-            {['Mission', 'Formation', 'Interne'].map(cat => <button key={cat} type="button" onClick={() => setProjectCategoryInput(cat)} className={`flex-1 py-4 rounded-2xl font-black uppercase text-xs border-2 transition-all ${projectCategoryInput === cat ? 'bg-black text-white border-black' : 'border-gray-200 text-gray-400'}`}>{cat}</button>)}
+            {['Mission', 'Formation', 'Interne'].map(cat => <button key={cat} type="button" onClick={() => setProjectCategoryInput(cat)} className={`flex-1 py-4 rounded-2xl font-black uppercase text-xs border-2 transition-all ${projectCategoryInput === cat ? 'bg-inverse text-on-inverse border-line-strong' : 'border-line text-ink-muted'}`}>{cat}</button>)}
           </div>
           <div className="flex gap-4">
-            <button type="submit" className="flex-1 bg-[#6186EA] text-white p-6 rounded-3xl font-black uppercase text-sm">
+            <button type="submit" className="flex-1 bg-primary text-on-primary p-6 rounded-3xl font-black uppercase text-sm">
               {editingProject ? 'Enregistrer les modifications' : 'Créer le projet'}
             </button>
             {editingProject && (
@@ -905,7 +905,7 @@ function App() {
                 <button
                   type="button"
                   onClick={() => { setEditingProject(null); setProjectNameInput(""); }}
-                  className="bg-gray-100 text-black p-6 rounded-3xl font-black uppercase text-sm"
+                  className="bg-hovered text-ink p-6 rounded-3xl font-black uppercase text-sm"
                 >
                   Annuler
                 </button>
@@ -918,7 +918,7 @@ function App() {
                     setProjectNameInput("");
                     fetchProjects();
                   }}
-                  className="bg-red-500 text-white p-6 rounded-3xl font-black uppercase text-sm hover:bg-red-600 transition-all"
+                  className="bg-danger text-on-primary p-6 rounded-3xl font-black uppercase text-sm hover:bg-danger-hover transition-all"
                 >
                   Supprimer
                 </button>
@@ -936,15 +936,15 @@ function App() {
               setProjectNameInput(p.name);
               setProjectCategoryInput(p.category);
             }}
-            className={`bg-white p-6 rounded-3xl border-2 flex items-center justify-between shadow-sm cursor-pointer transition-all ${editingProject?.id === p.id ? 'border-[#6186EA]' : 'border-black/5 hover:border-black/20'}`}
+            className={`bg-card p-6 rounded-3xl border-2 flex items-center justify-between shadow-sm cursor-pointer transition-all ${editingProject?.id === p.id ? 'border-primary' : 'border-line hover:border-line-hover'}`}
           >
             <div className="flex items-center gap-4">
-              <div className={`w-2 h-2 rounded-full ${p.category === 'Mission' ? 'bg-[#6186EA]' : p.category === 'Interne' ? 'bg-indigo-500' : 'bg-amber-400'}`}></div>
+              <div className={`w-2 h-2 rounded-full ${p.category === 'Mission' ? 'bg-primary' : p.category === 'Interne' ? 'bg-mission' : 'bg-interne'}`}></div>
               <span className="font-black uppercase text-sm">{p.name}</span>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{p.category}</span>
-              <Settings size={14} className="text-gray-300" />
+              <span className="text-[10px] font-black text-ink-muted uppercase tracking-widest">{p.category}</span>
+              <Settings size={14} className="text-ink-subtle" />
             </div>
           </div>
         ))}
@@ -954,14 +954,14 @@ function App() {
 
   const renderProfile = () => (
     <main className="max-w-xl mx-auto p-12">
-      <div className="bg-white rounded-[50px] p-16 shadow-2xl border-2 border-black">
+      <div className="bg-card rounded-[50px] p-16 shadow-2xl border-2 border-line-strong">
         <div className="text-center mb-10"><h2 className="text-4xl font-black uppercase tracking-tighter">{currentUser.full_name}</h2></div>
         <h3 className="text-xl font-black uppercase mb-8 flex items-center gap-3"><Lock size={20} /> Sécurité</h3>
         <form onSubmit={handlePassChange} className="space-y-6">
-          <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 tracking-widest uppercase ml-4">Ancien mot de passe</label><input type="password" value={passForm.old} onChange={e => setPassForm({ ...passForm, old: e.target.value })} className="w-full bg-gray-50 border-2 border-transparent focus:border-[#6186EA] p-5 rounded-2xl outline-none font-black text-sm" /></div>
-          <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 tracking-widest uppercase ml-4">Nouveau mot de passe</label><input type="password" value={passForm.new} onChange={e => setPassForm({ ...passForm, new: e.target.value })} className="w-full bg-gray-50 border-2 border-transparent focus:border-[#6186EA] p-5 rounded-2xl outline-none font-black text-sm" /></div>
-          <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 tracking-widest uppercase ml-4">Confirmer</label><input type="password" value={passForm.confirm} onChange={e => setPassForm({ ...passForm, confirm: e.target.value })} className="w-full bg-gray-50 border-2 border-transparent focus:border-[#6186EA] p-5 rounded-2xl outline-none font-black text-sm" /></div>
-          <button type="submit" disabled={loading} className="w-full bg-[#6186EA] text-white p-6 rounded-2xl font-black uppercase text-sm flex items-center justify-center gap-3">
+          <div className="space-y-2"><label className="text-[10px] font-black text-ink-muted tracking-widest uppercase ml-4">Ancien mot de passe</label><input type="password" value={passForm.old} onChange={e => setPassForm({ ...passForm, old: e.target.value })} className="w-full bg-input border-2 border-transparent focus:border-primary p-5 rounded-2xl outline-none font-black text-sm" /></div>
+          <div className="space-y-2"><label className="text-[10px] font-black text-ink-muted tracking-widest uppercase ml-4">Nouveau mot de passe</label><input type="password" value={passForm.new} onChange={e => setPassForm({ ...passForm, new: e.target.value })} className="w-full bg-input border-2 border-transparent focus:border-primary p-5 rounded-2xl outline-none font-black text-sm" /></div>
+          <div className="space-y-2"><label className="text-[10px] font-black text-ink-muted tracking-widest uppercase ml-4">Confirmer</label><input type="password" value={passForm.confirm} onChange={e => setPassForm({ ...passForm, confirm: e.target.value })} className="w-full bg-input border-2 border-transparent focus:border-primary p-5 rounded-2xl outline-none font-black text-sm" /></div>
+          <button type="submit" disabled={loading} className="w-full bg-primary text-on-primary p-6 rounded-2xl font-black uppercase text-sm flex items-center justify-center gap-3">
             {saveStatus === 'success' ? <CheckCircle2 size={20} /> : <Key size={18} />} {saveStatus === 'success' ? 'C\'est fait !' : 'Mettre à jour'}
           </button>
         </form>
