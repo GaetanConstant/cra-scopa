@@ -19,8 +19,11 @@ __pycache__/
 .idea/
 .vscode/
 
-# Local DB (if not wanted in git, but here we might want it for setup, but usually not)
-# database.db
+# Base de donnees : vit sur la VM, jamais dans le depot.
+# Sauvegarde quotidienne par deploy/systemd/cra-backup.timer.
+server/database.db
+server/*.db
+server/*.db-journal
 
 # OS
 .DS_Store

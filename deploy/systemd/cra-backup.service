@@ -1,0 +1,9 @@
+[Unit]
+Description=CRA SCOPA — sauvegarde quotidienne de la base
+
+[Service]
+Type=oneshot
+User=ubuntu
+# Copie atomique via l'API de sauvegarde SQLite : sûre même si l'app écrit
+# au même moment, contrairement à un simple cp. Trente jours conservés.
+ExecStart=/bin/sh -c 'mkdir -p /home/ubuntu/cra-backups && sqlite3 /home/ubuntu/cra-scopa/server/database.db ".backup /home/ubuntu/cra-backups/database-$(date +%%Y%%m%%d).db" && find /home/ubuntu/cra-backups -name "database-*.db" -mtime +30 -delete'

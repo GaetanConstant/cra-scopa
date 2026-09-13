@@ -1,0 +1,9 @@
+[Unit]
+Description=Sauvegarde quotidienne de la base du CRA
+
+[Timer]
+OnCalendar=*-*-* 03:00 Europe/Paris
+Persistent=true
+
+[Install]
+WantedBy=timers.target

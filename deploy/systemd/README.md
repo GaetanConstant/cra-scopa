@@ -9,9 +9,19 @@ la main.
 ```bash
 sudo cp cra-*.service cra-*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now cra-digest.timer cra-closing-reminder.timer
+sudo systemctl enable --now cra-digest.timer cra-closing-reminder.timer cra-backup.timer
 systemctl list-timers 'cra-*'
 ```
+
+## Sauvegarde de la base
+
+`server/database.db` n'est pas versionnée : elle vit sur la VM et
+`cra-backup.timer` la copie chaque nuit à 3h dans `~/cra-backups/`, trente
+jours glissants. Restaurer = arrêter le backend, copier le fichier voulu à sa
+place, redémarrer.
+
+Sur une machine neuve, créer le fichier avant le premier démarrage
+(`touch server/database.db`) : sans lui, Docker monte un dossier à sa place.
 
 ## Vérifier sans rien envoyer
 

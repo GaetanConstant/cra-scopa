@@ -16,9 +16,9 @@ COPY *.py ./
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY assets ./assets
-# La base est montee par docker-compose ; celle-ci ne sert qu'a un premier
-# demarrage sans volume.
-COPY database.db ./
+# La base n'est pas dans l'image : docker-compose la monte depuis l'hote.
+# Sur une machine neuve, creer le fichier avant le premier demarrage
+# (`touch server/database.db`), sinon Docker monte un dossier a sa place.
 
 # Exposer le port de FastAPI unifié (5500)
 EXPOSE 5500
