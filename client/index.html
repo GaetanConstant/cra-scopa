@@ -5,6 +5,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CRA Scopa - Les Artisans de la Donnée</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // Les couleurs Tailwind pointent sur les tokens de src/theme.css : une
+      // classe utilitaire suit donc le theme clair/sombre sans etre dupliquee.
+      // Pas de modificateur d'opacite sur ces couleurs (bg-card/50) : Tailwind
+      // ne sait pas l'appliquer a une var() — utiliser un token dedie.
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              main: 'var(--bg-main)',
+              card: 'var(--bg-card)',
+              input: 'var(--bg-input)',
+              hovered: 'var(--bg-hover)',
+              track: 'var(--bg-track)',
+              inverse: 'var(--bg-inverse)',
+              primary: 'var(--primary)',
+              'primary-soft': 'var(--primary-soft)',
+              ink: 'var(--text-main)',
+              'ink-muted': 'var(--text-muted)',
+              'ink-subtle': 'var(--text-subtle)',
+              'on-inverse': 'var(--text-on-inverse)',
+              'on-primary': 'var(--text-on-primary)',
+              line: 'var(--border)',
+              'line-strong': 'var(--border-strong)',
+              'line-hover': 'var(--border-hover)',
+              'line-inverse': 'var(--border-on-inverse)',
+              danger: 'var(--danger)',
+              'danger-hover': 'var(--danger-hover)',
+              success: 'var(--success)',
+              warning: 'var(--warning)',
+              mission: 'var(--accent-mission)',
+              formation: 'var(--accent-formation)',
+              interne: 'var(--accent-interne)',
+            },
+          },
+        },
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

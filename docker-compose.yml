@@ -2,6 +2,10 @@ services:
   backend:
     build: ./server
     container_name: scopa-backend
+    # SECRET_KEY vit dans server/.env, non versionne : a creer sur le serveur
+    # a partir de server/.env.example avant le premier demarrage.
+    env_file:
+      - ./server/.env
     ports:
       - "5500:5500"
     volumes:

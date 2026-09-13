@@ -1,0 +1,9 @@
+[Unit]
+Description=CRA SCOPA — rappel de clôture
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/cra-scopa/server
+ExecStart=/home/ubuntu/.local/bin/uv run python job_closing_reminder.py
