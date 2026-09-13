@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import axios from 'axios'
+import { API_BASE, closePeriod, copyWeek, getTimesheet, messageErreur } from './api/client'
+import { Conges } from './pages/Conges'
 import {
   format, startOfMonth, endOfMonth, eachDayOfInterval,
   isSameMonth, isSameDay, addMonths, subMonths,
@@ -11,34 +13,6 @@ import {
   Trash2, Save, AlertCircle, CheckCircle2, Loader2, User, LogOut, Lock, Key, Settings, Eye, EyeOff, Users, Layout, BarChart3,
   Moon, Sun
 } from 'lucide-react'
-
-const API_BASE = window.location.host.includes(':3300')
-  ? window.location.origin.replace(':3300', ':5500')
-  : (window.location.host.includes(':3000')
-    ? window.location.origin.replace(':3000', ':5500')
-    : (window.location.port ? window.location.origin.replace(`:${window.location.port}`, ':5500') : `${window.location.origin}/api`));
-
-// Toute requete porte le jeton delivre au login.
-axios.interceptors.request.use((config) => {
-  const token = localStorage.getItem('scopa_token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
-})
-
-// Jeton absent, invalide ou expire : on vide la session et on repart du login,
-// plutot que de laisser l'ecran se remplir d'erreurs silencieuses.
-axios.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    const isLoginCall = error.config?.url?.endsWith('/auth/login')
-    if (error.response?.status === 401 && !isLoginCall) {
-      localStorage.removeItem('scopa_token')
-      localStorage.removeItem('scopa_user')
-      window.location.reload()
-    }
-    return Promise.reject(error)
-  }
-)
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
@@ -294,6 +268,56 @@ function App() {
     return total;
   };
 
+  // Metadonnees du mois : feries, absences approuvees, cloture, trous.
+  // Un seul aller-retour, la ou l'ecran devrait croiser quatre sources.
+  const [meta, setMeta] = useState(null)
+  const [metaBusy, setMetaBusy] = useState(false)
+  const period = format(currentDate, 'yyyy-MM')
+
+  const chargerMeta = async () => {
+    if (!currentUser) return
+    try {
+      setMeta(await getTimesheet(period, currentUser.id))
+    } catch (err) {
+      setMeta(null)
+    }
+  }
+
+  useEffect(() => { chargerMeta() }, [period, currentUser?.id])
+
+  const feriesDuMois = useMemo(() => new Set(meta?.holidays ?? []), [meta])
+  const chargeAbsences = meta?.leave_load ?? {}
+
+  const cloturerLeMois = async () => {
+    setMetaBusy(true)
+    setErrorMsg('')
+    try {
+      await closePeriod(period)
+      await chargerMeta()
+    } catch (err) {
+      setErrorMsg(messageErreur(err, "Le mois n'a pas pu etre cloture"))
+      await chargerMeta()
+    } finally {
+      setMetaBusy(false)
+    }
+  }
+
+  const copierLaSemaine = async () => {
+    setMetaBusy(true)
+    setErrorMsg('')
+    try {
+      const lundi = new Date()
+      lundi.setDate(lundi.getDate() - ((lundi.getDay() + 6) % 7))
+      await copyWeek(format(lundi, 'yyyy-MM-dd'))
+      await fetchCRA()
+      await chargerMeta()
+    } catch (err) {
+      setErrorMsg(messageErreur(err, "La copie n'a pas abouti"))
+    } finally {
+      setMetaBusy(false)
+    }
+  }
+
   const monthStats = useMemo(() => {
     const workingDays = daysInMonth.filter(d => getDay(d) !== 0 && getDay(d) !== 6).length;
     let totalEntered = 0;
@@ -321,6 +345,7 @@ function App() {
         <div className="flex items-center gap-8">
           <nav className="flex items-center gap-6 font-black text-xs tracking-widest uppercase">
             <button onClick={() => setCurrentView('cra')} className={`transition-all ${currentView === 'cra' ? 'text-primary' : 'opacity-30'}`}>Mon CRA</button>
+            <button onClick={() => setCurrentView('conges')} className={`transition-all ${currentView === 'conges' ? 'text-primary' : 'opacity-30'}`}>Congés</button>
             {currentUser.is_admin && (
               <>
                 <button onClick={() => setCurrentView('projects')} className={`transition-all ${currentView === 'projects' ? 'text-primary' : 'opacity-30'}`}>Projets</button>
@@ -438,13 +463,42 @@ function App() {
     </main>
   );
 
+  const renderBandeauMois = () => {
+    if (!meta) return null
+    const trous = meta.missing_days ?? []
+    const surcharges = Object.entries(meta.overloaded_days ?? {})
+
+    return (
+      <div className="flex flex-col gap-3 mb-8">
+        {meta.closed && (
+          <div className="bg-primary-soft border-2 border-primary rounded-2xl px-6 py-4 text-sm font-black uppercase tracking-widest text-primary">
+            Mois clôturé — lecture seule. Un administrateur peut le rouvrir.
+          </div>
+        )}
+        {!meta.closed && trous.length > 0 && (
+          <div role="status" className="bg-card border-2 border-warning rounded-2xl px-6 py-4 text-sm">
+            <span className="font-black uppercase tracking-widest text-warning">
+              {trous.length} jour{trous.length > 1 ? 's' : ''} ouvré{trous.length > 1 ? 's' : ''} sans saisie ni absence
+            </span>
+            <span className="text-ink-muted"> — {trous.map(j => j.slice(8)).join(', ')}</span>
+          </div>
+        )}
+        {surcharges.length > 0 && (
+          <div className="text-xs text-ink-muted">
+            Journées à plus d'une unité : {surcharges.map(([j, v]) => `${j.slice(8)} (${v})`).join(', ')}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const renderSpreadsheet = () => (
     <main className="p-8 w-full">
       <div className="max-w-[100vw] mx-auto">
-        <div className="flex items-center justify-between mb-10">
+        <div className="flex items-start justify-between gap-6 flex-wrap mb-10">
           <div>
             <h2 className="text-5xl font-black uppercase tracking-tighter mb-4">Mon activité</h2>
-            <div className="flex items-center gap-6">
+            <div className="flex items-start gap-6 flex-wrap">
               <div className="flex flex-col gap-2">
                 <div className="flex items-center bg-card rounded-2xl p-2 shadow-sm border border-line">
                   <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-hovered p-2 rounded-xl transition-all"><ChevronLeft size={20} /></button>
@@ -463,7 +517,23 @@ function App() {
                   </span>
                 </div>
               </div>
-              <div className="flex gap-2 self-start mt-1">
+              <div className="flex gap-2 self-start mt-1 flex-wrap">
+                <button
+                  type="button"
+                  onClick={copierLaSemaine}
+                  disabled={metaBusy || meta?.closed}
+                  className="bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-primary disabled:opacity-40"
+                >
+                  Copier la semaine précédente
+                </button>
+                <button
+                  type="button"
+                  onClick={cloturerLeMois}
+                  disabled={metaBusy || meta?.closed}
+                  className="bg-card border-2 border-line rounded-2xl px-6 py-3 font-black uppercase text-[10px] hover:border-primary disabled:opacity-40"
+                >
+                  {meta?.closed ? 'Mois clôturé' : 'Clôturer le mois'}
+                </button>
                 <select
                   onChange={(e) => {
                     const pid = e.target.value; if (!pid) return;
@@ -481,25 +551,35 @@ function App() {
               </div>
             </div>
           </div>
-          <button onClick={saveCRA} disabled={loading} className={`flex items-center gap-3 px-10 py-5 rounded-3xl font-black uppercase text-sm transition-all shadow-xl ${saveStatus === 'success' ? 'bg-success text-on-primary' : 'bg-primary text-on-primary hover:scale-105 hover:shadow-2xl'}`}>
+          <button onClick={saveCRA} disabled={loading || meta?.closed} className={`flex items-center gap-3 px-10 py-5 rounded-3xl font-black uppercase text-sm transition-all shadow-xl disabled:opacity-40 ${saveStatus === 'success' ? 'bg-success text-on-primary' : 'bg-primary text-on-primary hover:scale-105 hover:shadow-2xl'}`}>
             {loading ? <Loader2 className="animate-spin" size={20} /> : (saveStatus === 'success' ? <CheckCircle2 size={20} /> : <Save size={20} />)}
             {saveStatus === 'success' ? 'Enregistré' : 'Sauvegarder'}
           </button>
         </div>
 
         <div className="bg-card rounded-[40px] shadow-2xl border border-line overflow-x-auto custom-scrollbar">
+          {renderBandeauMois()}
           <table className="w-full border-collapse min-w-[1500px]">
             <thead>
               <tr className="bg-input">
                 <th className="sticky left-0 z-20 bg-input p-6 text-left border-b-2 border-line min-w-[300px] shadow-[4px_0_10px_-5px_rgba(0,0,0,0.05)] text-[10px] font-black uppercase text-ink-muted">Projets / Activités</th>
-                {daysInMonth.map(day => (
-                  <th key={format(day, 'yyyy-MM-dd')} className={`p-4 border-b-2 border-line min-w-[50px] ${getDay(day) === 0 || getDay(day) === 6 ? 'bg-hovered opacity-40' : ''}`}>
-                    <div className="flex flex-col items-center">
-                      <span className="text-[10px] font-black uppercase tracking-tighter mb-1">{format(day, 'EEE', { locale: fr })}</span>
-                      <span className="text-lg font-black">{format(day, 'd')}</span>
-                    </div>
-                  </th>
-                ))}
+                {daysInMonth.map(day => {
+                  const dateStr = format(day, 'yyyy-MM-dd');
+                  const ferie = feriesDuMois.has(dateStr);
+                  const nonOuvre = getDay(day) === 0 || getDay(day) === 6 || ferie;
+                  return (
+                    <th
+                      key={dateStr}
+                      title={ferie ? 'Jour férié' : undefined}
+                      className={`p-4 border-b-2 border-line min-w-[50px] ${nonOuvre ? 'bg-hovered opacity-40' : ''}`}
+                    >
+                      <div className="flex flex-col items-center">
+                        <span className="text-[10px] font-black uppercase tracking-tighter mb-1">{format(day, 'EEE', { locale: fr })}</span>
+                        <span className="text-lg font-black">{format(day, 'd')}</span>
+                      </div>
+                    </th>
+                  );
+                })}
                 <th className="p-6 border-b-2 border-line font-black text-[10px] uppercase text-ink-muted">Total</th>
               </tr>
             </thead>
@@ -518,11 +598,27 @@ function App() {
                       const dateStr = format(day, 'yyyy-MM-dd');
                       const val = gridData[row.key]?.[dateStr] || 0;
                       if (val > 0) totalRow += val;
+                      const ferie = feriesDuMois.has(dateStr);
+                      const weekend = getDay(day) === 0 || getDay(day) === 6;
+                      // Journee entierement couverte par une absence approuvee :
+                      // il n'y a plus rien a imputer dessus.
+                      const absent = (chargeAbsences[dateStr] ?? 0) >= 1;
+                      const verrouille = meta?.closed || absent;
                       return (
-                        <td key={dateStr} className={`p-2 border-r border-line ${getDay(day) === 0 || getDay(day) === 6 ? 'bg-input opacity-30 grayscale' : ''}`}>
-                          {getDay(day) !== 0 && getDay(day) !== 6 && (
+                        <td
+                          key={dateStr}
+                          title={absent ? 'Absence approuvée' : (ferie ? 'Jour férié' : undefined)}
+                          className={`p-2 border-r border-line ${weekend || ferie ? 'bg-input opacity-30 grayscale' : ''} ${absent ? 'bg-primary-soft' : ''}`}
+                        >
+                          {!weekend && !ferie && absent && (
+                            <div className="text-center text-[10px] font-black uppercase tracking-widest text-primary">
+                              Absent
+                            </div>
+                          )}
+                          {!weekend && !ferie && !absent && (
                             <input
                               type="text"
+                              readOnly={verrouille}
                               value={draftCell.key === row.key && draftCell.date === dateStr ? draftCell.value : (val || "")}
                               placeholder="0"
                               onFocus={() => setDraftCell({ key: row.key, date: dateStr, value: val || "" })}
@@ -979,6 +1075,7 @@ function App() {
     >
       {renderHeader()}
       {currentUser && currentView === 'cra' && renderSpreadsheet()}
+      {currentUser && currentView === 'conges' && <Conges currentUser={currentUser} />}
       {currentUser && currentView === 'projects' && renderProjectsView()}
       {currentUser && currentView === 'admin_cra' && renderAdminCRAView()}
       {currentUser && currentView === 'admin_global' && renderAdminGlobalView()}
