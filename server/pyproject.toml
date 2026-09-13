@@ -14,3 +14,15 @@ dependencies = [
     "sqlmodel>=0.0.37",
     "uvicorn>=0.41.0",
 ]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+# `main.py` et `conftest.py` sont a la racine du package serveur : sans cela
+# l'import de `main` echoue depuis tests/.
+pythonpath = [".", "tests"]
+testpaths = ["tests"]
