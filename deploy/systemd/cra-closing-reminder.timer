@@ -5,7 +5,7 @@ Description=Rappel de clôture du CRA
 # Le job tourne tous les jours et décide lui-même : il n'agit que le premier
 # jour ouvré à partir du 20. Mettre ce calendrier dans systemd obligerait à y
 # encoder les week-ends et les jours fériés.
-OnCalendar=*-*-* 09:00
+OnCalendar=*-*-* 09:00 Europe/Paris
 Persistent=true
 
 [Install]
