@@ -11,9 +11,14 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
 # Copier le code source et la base de données
-COPY main.py auth.py seed.py database.db ./
+# Tout le code serveur : modules metier, jobs, scripts d'alimentation.
+COPY *.py ./
 COPY alembic.ini ./
 COPY alembic ./alembic
+COPY assets ./assets
+# La base est montee par docker-compose ; celle-ci ne sert qu'a un premier
+# demarrage sans volume.
+COPY database.db ./
 
 # Exposer le port de FastAPI unifié (5500)
 EXPOSE 5500
