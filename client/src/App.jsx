@@ -3,6 +3,7 @@ import axios from 'axios'
 import { API_BASE, closePeriod, getTimesheet, messageErreur } from './api/client'
 import { Conges } from './pages/Conges'
 import { Tickets } from './pages/Tickets'
+import { Activite } from './pages/Activite'
 import {
   format, startOfMonth, endOfMonth, eachDayOfInterval,
   isSameMonth, isSameDay, addMonths, subMonths,
@@ -332,6 +333,7 @@ function App() {
             <button onClick={() => setCurrentView('cra')} className={`transition-all ${currentView === 'cra' ? 'text-primary' : 'opacity-30'}`}>Mon CRA</button>
             <button onClick={() => setCurrentView('conges')} className={`transition-all ${currentView === 'conges' ? 'text-primary' : 'opacity-30'}`}>Congés</button>
             <button onClick={() => setCurrentView('tickets')} className={`transition-all ${currentView === 'tickets' ? 'text-primary' : 'opacity-30'}`}>Tickets</button>
+            <button onClick={() => setCurrentView('activite')} className={`transition-all ${currentView === 'activite' ? 'text-primary' : 'opacity-30'}`}>Activité</button>
             {currentUser.is_admin && (
               <>
                 <button onClick={() => setCurrentView('projects')} className={`transition-all ${currentView === 'projects' ? 'text-primary' : 'opacity-30'}`}>Projets</button>
@@ -1068,6 +1070,7 @@ function App() {
       {currentUser && currentView === 'cra' && renderSpreadsheet()}
       {currentUser && currentView === 'conges' && <Conges currentUser={currentUser} />}
       {currentUser && currentView === 'tickets' && <Tickets currentUser={currentUser} />}
+      {currentUser && currentView === 'activite' && <Activite />}
       {currentUser && currentView === 'projects' && renderProjectsView()}
       {currentUser && currentView === 'admin_cra' && renderAdminCRAView()}
       {currentUser && currentView === 'admin_global' && renderAdminGlobalView()}

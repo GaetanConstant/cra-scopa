@@ -7,12 +7,14 @@ from sqlmodel import Field, Relationship, SQLModel, create_engine, Session, sele
 from sqlalchemy.orm import selectinload
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 from holidays import holidays_for_range
 from leaves import LeaveError, count_leave_days, daily_load, overlaps
 from positions import GAP, needs_rebalance, position_between, rebalance
+from reporting import summarise_user, to_csv, working_days_count
 from timesheet import (
     TimesheetError,
     check_quantities,
@@ -1130,6 +1132,118 @@ def read_team_calendar(
         }
         for d in demandes
     ]
+
+
+# --- Activite ------------------------------------------------------------
+
+COLONNES_EXPORT = (
+    "collaborateur",
+    "jours_ouvres",
+    "jours_absence",
+    "jours_disponibles",
+    "jours_saisis",
+    "jours_manquants",
+    "taux_occupation",
+)
+
+
+def activite(session: Session, debut: date, fin: date) -> List[dict]:
+    """Activite de chaque consultant sur la periode.
+
+    Un seul parcours des saisies et des absences, puis un agregat par
+    utilisateur : les ecrans en avaient besoin ensemble, pas separement.
+    """
+    utilisateurs = session.exec(select(User).order_by(User.full_name)).all()
+    projets = {p.id: p for p in session.exec(select(Project)).all()}
+    feries = charger_feries(session, debut, fin)
+    ouvres = working_days_count(debut, fin, feries)
+
+    lignes = session.exec(
+        select(CRAEntry).where(CRAEntry.date >= debut, CRAEntry.date <= fin)
+    ).all()
+
+    par_utilisateur: dict[int, dict[str, float]] = {}
+    for ligne in lignes:
+        libelle = (
+            projets[ligne.project_id].name
+            if ligne.project_id and ligne.project_id in projets
+            else ligne.activity_type
+        )
+        detail = par_utilisateur.setdefault(ligne.user_id, {})
+        detail[libelle] = round(detail.get(libelle, 0.0) + ligne.duration_factor, 2)
+
+    resultat = []
+    for utilisateur in utilisateurs:
+        detail = par_utilisateur.get(utilisateur.id, {})
+        absences = sum(charge_absences(session, utilisateur.id, debut, fin).values())
+        resultat.append(
+            {
+                "user_id": utilisateur.id,
+                "full_name": utilisateur.full_name,
+                **summarise_user(detail, ouvres, absences),
+                "by_project": [
+                    {"label": libelle, "days": jours}
+                    for libelle, jours in sorted(
+                        detail.items(), key=lambda kv: -kv[1]
+                    )
+                ],
+            }
+        )
+    return resultat
+
+
+@app.get("/reporting/activity")
+def read_activity(
+    from_date: date,
+    to_date: date,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Jours ouvres, absences, jours saisis et taux d'occupation par consultant."""
+    if to_date < from_date:
+        raise HTTPException(
+            status_code=422, detail="La date de fin precede la date de debut"
+        )
+    return {
+        "from_date": from_date,
+        "to_date": to_date,
+        "rows": activite(session, from_date, to_date),
+    }
+
+
+@app.get("/reporting/activity/export", response_class=PlainTextResponse)
+def export_activity(
+    from_date: date,
+    to_date: date,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Le meme tableau en CSV, separateur point-virgule."""
+    if to_date < from_date:
+        raise HTTPException(
+            status_code=422, detail="La date de fin precede la date de debut"
+        )
+    lignes = [
+        {
+            "collaborateur": ligne["full_name"],
+            "jours_ouvres": ligne["working_days"],
+            "jours_absence": ligne["leave_days"],
+            "jours_disponibles": ligne["available_days"],
+            "jours_saisis": ligne["entered_days"],
+            "jours_manquants": ligne["missing_days"],
+            "taux_occupation": ligne["occupancy"],
+        }
+        for ligne in activite(session, from_date, to_date)
+    ]
+    return PlainTextResponse(
+        to_csv(lignes, COLONNES_EXPORT),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="activite-{from_date}-{to_date}.csv"'
+            )
+        },
+    )
 
 
 # --- Tickets --------------------------------------------------------------

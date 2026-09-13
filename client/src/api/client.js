@@ -93,3 +93,10 @@ export const addComment = (id, body) => post(`/tickets/${id}/comments`, { body }
 export const getTags = () => get('/tickets/tags')
 export const createTag = (corps) => post('/tickets/tags', corps)
 export const getProjects = () => get('/projects/')
+
+// --- Activité --------------------------------------------------------------
+
+export const getActivity = (from_date, to_date) =>
+  get('/reporting/activity', { from_date, to_date })
+export const exportActivity = (from_date, to_date) =>
+  get('/reporting/activity/export', { from_date, to_date })
