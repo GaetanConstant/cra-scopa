@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
+from holidays import holidays_for_range
 from auth import (
     bearer_scheme,
     create_access_token,
@@ -166,6 +167,23 @@ class Project(SQLModel, table=True):
     client: Optional[Client] = Relationship(back_populates="projects")
     cra_entries: List["CRAEntry"] = Relationship(back_populates="project")
     users: List["User"] = Relationship(back_populates="projects", link_model=UserProjectLink)
+
+# La colonne s'appelle `date`, comme le type : sans alias, Pydantic resout
+# l'annotation vers le champ plutot que vers datetime.date.
+DateType = date
+
+
+class PublicHoliday(SQLModel, table=True):
+    """Jour ferie, alimente par seed_holidays.py.
+
+    La table est la reference commune du decompte des conges et des jours
+    ouvres du pilotage : le calcul vit dans holidays.py, mais deux modules
+    qui recalculent chacun de leur cote finiraient par diverger.
+    """
+
+    date: DateType = Field(primary_key=True)
+    label: str
+
 
 class CRAEntry(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -560,6 +578,23 @@ def update_assignment(
     session.add(lien)
     session.commit()
     return {"status": "ok"}
+
+
+@app.get("/holidays")
+def read_holidays(
+    year: Optional[int] = None,
+    session: Session = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Jours feries en base, filtres sur une annee si elle est fournie."""
+    requete = select(PublicHoliday)
+    if year is not None:
+        requete = requete.where(
+            PublicHoliday.date >= date(year, 1, 1),
+            PublicHoliday.date <= date(year, 12, 31),
+        )
+    jours = session.exec(requete.order_by(PublicHoliday.date)).all()
+    return [{"date": j.date, "label": j.label} for j in jours]
 
 
 @app.post("/cra/batch")
