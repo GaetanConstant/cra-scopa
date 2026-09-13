@@ -4,6 +4,7 @@ import {
   KeyboardSensor,
   PointerSensor,
   closestCorners,
+  useDroppable,
   useSensor,
   useSensors,
 } from '@dnd-kit/core'
@@ -26,7 +27,12 @@ import {
   messageErreur,
   patchTicket,
 } from '../api/client'
-import { COLONNES, useTickets } from '../hooks/useTickets'
+import {
+  REGROUPEMENTS,
+  SANS_ETIQUETTE,
+  SANS_PROJET,
+  useTickets,
+} from '../hooks/useTickets'
 
 const PRIORITES = [
   { id: 'low', label: 'Basse' },
@@ -53,9 +59,14 @@ function initiales(nom) {
     .join('')
 }
 
-function Carte({ ticket, utilisateurs, tags, onOuvrir }) {
+function Carte({ ticket, utilisateurs, tags, projets, colonneId, onOuvrir }) {
+  // L'identifiant de glissement porte la colonne d'origine. En mode
+  // étiquette, une carte à deux étiquettes s'affiche dans deux colonnes :
+  // avec le seul id du ticket, dnd-kit verrait deux éléments identiques.
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: ticket.id })
+    useSortable({ id: `${colonneId}::${ticket.id}` })
+
+  const projet = projets.find((p) => p.id === ticket.project_id)
 
   const assigne = utilisateurs.find((u) => u.id === ticket.assignee_id)
   const enRetard =
@@ -84,7 +95,13 @@ function Carte({ ticket, utilisateurs, tags, onOuvrir }) {
         />
       </div>
 
-      <p className="text-sm font-black leading-snug line-clamp-2 mb-3">{ticket.title}</p>
+      <p className="text-sm font-black leading-snug line-clamp-2 mb-2">{ticket.title}</p>
+
+      {projet && (
+        <p className="text-[9px] font-black uppercase tracking-widest text-primary mb-2 truncate">
+          {projet.code || projet.name}
+        </p>
+      )}
 
       <div className="flex items-center justify-between gap-2">
         <div className="flex gap-1 flex-wrap">
@@ -125,7 +142,11 @@ function Carte({ ticket, utilisateurs, tags, onOuvrir }) {
   )
 }
 
-function Colonne({ colonne, cartes, utilisateurs, tags, onOuvrir }) {
+function Colonne({ colonne, cartes, utilisateurs, tags, projets, onOuvrir }) {
+  // Sans zone de dépôt propre, une colonne vide n'accepterait rien : en mode
+  // étiquette ou projet, la plupart le sont au départ.
+  const { setNodeRef, isOver } = useDroppable({ id: colonne.id })
+
   return (
     <section className="flex-1 min-w-[260px] flex flex-col">
       <header className="flex items-center justify-between mb-4 px-1">
@@ -134,14 +155,25 @@ function Colonne({ colonne, cartes, utilisateurs, tags, onOuvrir }) {
         </h3>
         <span className="text-[10px] font-black text-ink-subtle">{cartes.length}</span>
       </header>
-      <SortableContext items={cartes.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-        <div className="flex flex-col gap-3 bg-input rounded-[20px] p-3 min-h-[140px] flex-1">
+      <SortableContext
+        id={String(colonne.id)}
+        items={cartes.map((t) => `${colonne.id}::${t.id}`)}
+        strategy={verticalListSortingStrategy}
+      >
+        <div
+          ref={setNodeRef}
+          className={`flex flex-col gap-3 rounded-[20px] p-3 min-h-[140px] flex-1 transition-colors ${
+            isOver ? 'bg-primary-soft' : 'bg-input'
+          }`}
+        >
           {cartes.map((t) => (
             <Carte
-              key={t.id}
+              key={`${colonne.id}-${t.id}`}
               ticket={t}
               utilisateurs={utilisateurs}
               tags={tags}
+              projets={projets}
+              colonneId={colonne.id}
               onOuvrir={onOuvrir}
             />
           ))}
@@ -151,7 +183,7 @@ function Colonne({ colonne, cartes, utilisateurs, tags, onOuvrir }) {
   )
 }
 
-function Tiroir({ ticketId, utilisateurs, tags, currentUser, onFermer, onChange }) {
+function Tiroir({ ticketId, utilisateurs, tags, projets, currentUser, onFermer, onChange }) {
   const [detail, setDetail] = useState(null)
   const [commentaire, setCommentaire] = useState('')
   const [erreur, setErreur] = useState(null)
@@ -272,6 +304,25 @@ function Tiroir({ ticketId, utilisateurs, tags, currentUser, onFermer, onChange 
               </select>
             </div>
             <div className="form-group col-span-2">
+              <label htmlFor="projet">Projet</label>
+              <select
+                id="projet"
+                className="form-input"
+                value={detail.project_id ?? ''}
+                onChange={(e) =>
+                  modifier({ project_id: e.target.value ? Number(e.target.value) : null })
+                }
+              >
+                <option value="">Aucun projet</option>
+                {projets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group col-span-2">
               <label htmlFor="echeance">Échéance</label>
               <input
                 id="echeance"
@@ -367,7 +418,11 @@ function Tiroir({ ticketId, utilisateurs, tags, currentUser, onFermer, onChange 
 
 export function Tickets({ currentUser }) {
   const {
-    board,
+    colonnes,
+    cartesDe,
+    groupBy,
+    setGroupBy,
+    projets,
     tags,
     utilisateurs,
     loading,
@@ -376,13 +431,15 @@ export function Tickets({ currentUser }) {
     filtres,
     setFiltres,
     recharger,
-    deplacer,
+    deplacerStatut,
+    deplacerEtiquette,
+    deplacerProjet,
   } = useTickets()
 
   const [ouvert, setOuvert] = useState(null)
   const [nouveauTitre, setNouveauTitre] = useState('')
   // Sous 768 px le glisser-déposer est remplacé par un onglet de statut.
-  const [colonneMobile, setColonneMobile] = useState('todo')
+  const [colonneMobile, setColonneMobile] = useState(null)
 
   const sensors = useSensors(
     // 8 px avant d'armer le glissement : sans ce seuil, un clic sur la carte
@@ -391,16 +448,33 @@ export function Tickets({ currentUser }) {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  const colonneDe = (id) =>
-    COLONNES.find((c) => (board[c.id] ?? []).some((t) => t.id === id))?.id
+  /** « colonne::ticket » vers { colonne, ticketId }, ou null pour une zone nue. */
+  const lire = (id) => {
+    const texte = String(id)
+    const separateur = texte.indexOf('::')
+    if (separateur === -1) return { colonne: texte, ticketId: null }
+    return {
+      colonne: texte.slice(0, separateur),
+      ticketId: Number(texte.slice(separateur + 2)),
+    }
+  }
 
   const auDepot = ({ active, over }) => {
     if (!over || active.id === over.id) return
-    const cible = colonneDe(over.id) ?? over.id
-    if (!COLONNES.some((c) => c.id === cible)) return
-    const dansCible = board[cible] ?? []
-    const surUneCarte = dansCible.some((t) => t.id === over.id)
-    deplacer(active.id, cible, surUneCarte ? over.id : null)
+    const source = lire(active.id)
+    const cible = lire(over.id)
+    if (!colonnes.some((c) => String(c.id) === cible.colonne)) return
+
+    if (groupBy === 'status') {
+      deplacerStatut(source.ticketId, cible.colonne, cible.ticketId)
+      return
+    }
+    if (source.colonne === cible.colonne) return
+    if (groupBy === 'tag') {
+      deplacerEtiquette(source.ticketId, source.colonne, cible.colonne)
+    } else {
+      deplacerProjet(source.ticketId, cible.colonne)
+    }
   }
 
   const creer = async (e) => {
@@ -449,6 +523,20 @@ export function Tickets({ currentUser }) {
           </button>
         </form>
 
+        <div className="flex items-center gap-1 bg-input rounded-2xl p-1">
+          {REGROUPEMENTS.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => setGroupBy(r.id)}
+              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                groupBy === r.id ? 'bg-card text-primary shadow-sm' : 'text-ink-muted'
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+
         <button
           onClick={() => setFiltres({ ...filtres, mine: !filtres.mine })}
           className={`px-5 py-3 rounded-2xl font-black uppercase text-[10px] tracking-widest border-2 transition-all ${
@@ -488,6 +576,21 @@ export function Tickets({ currentUser }) {
         </select>
         </div>
 
+        <div className="w-[190px]">
+          <select
+            className="form-input"
+            value={filtres.project_id}
+            onChange={(e) => setFiltres({ ...filtres, project_id: e.target.value })}
+          >
+            <option value="">Tous projets</option>
+            {projets.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="w-[200px]">
           <input
             className="form-input"
@@ -501,14 +604,15 @@ export function Tickets({ currentUser }) {
       {/* Écran large : les quatre colonnes, glisser-déposer actif. */}
       <div className="hidden md:block">
         <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={auDepot}>
-          <div className="flex gap-4 items-stretch">
-            {COLONNES.map((c) => (
+          <div className="flex gap-4 items-stretch overflow-x-auto custom-scrollbar pb-2">
+            {colonnes.map((c) => (
               <Colonne
                 key={c.id}
                 colonne={c}
-                cartes={board[c.id] ?? []}
+                cartes={cartesDe(c.id)}
                 utilisateurs={utilisateurs}
                 tags={tags}
+                projets={projets}
                 onOuvrir={setOuvert}
               />
             ))}
@@ -519,20 +623,22 @@ export function Tickets({ currentUser }) {
       {/* Mobile : une colonne à la fois, déplacement par menu. */}
       <div className="md:hidden">
         <div className="flex gap-2 mb-4 overflow-x-auto custom-scrollbar pb-2">
-          {COLONNES.map((c) => (
+          {colonnes.map((c) => (
             <button
               key={c.id}
               onClick={() => setColonneMobile(c.id)}
               className={`shrink-0 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest border-2 ${
-                colonneMobile === c.id ? 'border-primary text-primary' : 'border-line text-ink-muted'
+                (colonneMobile ?? colonnes[0]?.id) === c.id
+                  ? 'border-primary text-primary'
+                  : 'border-line text-ink-muted'
               }`}
             >
-              {c.label} ({(board[c.id] ?? []).length})
+              {c.label} ({cartesDe(c.id).length})
             </button>
           ))}
         </div>
         <div className="flex flex-col gap-3">
-          {(board[colonneMobile] ?? []).map((t) => (
+          {cartesDe(colonneMobile ?? colonnes[0]?.id).map((t) => (
             <div key={t.id} className="bg-card border-2 border-line rounded-2xl p-4">
               <button onClick={() => setOuvert(t.id)} className="text-left w-full">
                 <span className="text-[9px] font-black uppercase tracking-widest text-ink-muted">
@@ -543,14 +649,23 @@ export function Tickets({ currentUser }) {
               <select
                 className="form-input mt-3"
                 value=""
-                onChange={(e) => e.target.value && deplacer(t.id, e.target.value)}
+                onChange={(e) => {
+                  const vers = e.target.value
+                  if (!vers) return
+                  const depuis = colonneMobile ?? colonnes[0]?.id
+                  if (groupBy === 'status') deplacerStatut(t.id, vers)
+                  else if (groupBy === 'tag') deplacerEtiquette(t.id, depuis, vers)
+                  else deplacerProjet(t.id, vers)
+                }}
               >
                 <option value="">Déplacer vers…</option>
-                {COLONNES.filter((c) => c.id !== t.status).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label}
-                  </option>
-                ))}
+                {colonnes
+                  .filter((c) => c.id !== (colonneMobile ?? colonnes[0]?.id))
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
               </select>
             </div>
           ))}
@@ -571,6 +686,7 @@ export function Tickets({ currentUser }) {
           ticketId={ouvert}
           utilisateurs={utilisateurs}
           tags={tags}
+          projets={projets}
           currentUser={currentUser}
           onFermer={() => setOuvert(null)}
           onChange={recharger}

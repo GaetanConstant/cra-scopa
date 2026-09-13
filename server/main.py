@@ -282,6 +282,9 @@ class TkTicket(SQLModel, table=True):
     priority: str = "medium"
     assignee_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     reporter_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    # Mission a laquelle le ticket se rattache. Nullable : tout le travail
+    # n'est pas imputable a un projet (interne, outillage, veille).
+    project_id: Optional[int] = Field(default=None, foreign_key="project.id", index=True)
     position: float = 0.0
     due_date: Optional[DateType] = None
     created_at: datetime = Field(default_factory=datetime.now)
@@ -436,6 +439,7 @@ class TicketCreate(BaseModel):
     status: str = "todo"
     priority: str = "medium"
     assignee_id: Optional[int] = None
+    project_id: Optional[int] = None
     due_date: Optional[date] = None
     tag_ids: List[int] = []
 
@@ -445,6 +449,7 @@ class TicketUpdate(BaseModel):
     description: Optional[str] = None
     priority: Optional[str] = None
     assignee_id: Optional[int] = None
+    project_id: Optional[int] = None
     due_date: Optional[date] = None
     tag_ids: Optional[List[int]] = None
 
@@ -1244,6 +1249,7 @@ def read_board(
     tag_id: Optional[int] = None,
     q: Optional[str] = None,
     priority: Optional[str] = None,
+    project_id: Optional[int] = None,
     mine: bool = False,
     done_since_days: int = 30,
     session: Session = Depends(get_session),
@@ -1262,6 +1268,8 @@ def read_board(
         requete = requete.where(TkTicket.assignee_id == assignee_id)
     if priority is not None:
         requete = requete.where(TkTicket.priority == priority)
+    if project_id is not None:
+        requete = requete.where(TkTicket.project_id == project_id)
     if q:
         motif = f"%{q}%"
         requete = requete.where(TkTicket.title.like(motif))
@@ -1336,6 +1344,7 @@ def create_ticket(
         status=req.status,
         priority=req.priority,
         assignee_id=req.assignee_id,
+        project_id=req.project_id,
         reporter_id=current_user.id,
         due_date=req.due_date,
         position=position_en_queue(session, req.status),
