@@ -14,7 +14,7 @@ Rien n'est envoyé à qui n'a rien à lire.
 import argparse
 import logging
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from sqlmodel import Session, select
 
@@ -34,7 +34,6 @@ import mail_content
 logger = logging.getLogger(__name__)
 
 KIND = "daily_digest"
-STATUTS_OUVERTS = ("todo", "in_progress", "to_validate")
 
 
 def _libelle(ticket: TkTicket, projets: dict[int, Project]) -> str:
@@ -54,52 +53,45 @@ def _anciennete(ticket: TkTicket, aujourdhui: date) -> str:
 def sections_pour(
     session: Session, utilisateur: User, aujourdhui: date
 ) -> dict[str, list[str]]:
-    """Ce qu'un utilisateur doit voir ce matin."""
+    """Ce qu'un utilisateur doit voir ce matin.
+
+    Comme assigne : ce qu'il a a faire et ce qu'il a en cours, tous les jours
+    tant que la liste n'est pas vide. Comme rapporteur : ce qui attend sa
+    relecture. Une echeance depassee est signalee sur la ligne plutot que
+    dans une section a part.
+    """
     projets = {p.id: p for p in session.exec(select(Project)).all()}
-    demain = aujourdhui + timedelta(days=1)
+
+    def ligne(t: TkTicket, avec_anciennete: bool = False) -> str:
+        texte = _libelle(t, projets)
+        if t.due_date and t.due_date < aujourdhui:
+            texte += " — EN RETARD"
+        if avec_anciennete:
+            texte += f" ({_anciennete(t, aujourdhui)})"
+        return texte
 
     miens = session.exec(
-        select(TkTicket).where(
+        select(TkTicket)
+        .where(
             TkTicket.assignee_id == utilisateur.id,
-            TkTicket.status.in_(STATUTS_OUVERTS),
+            TkTicket.status.in_(("todo", "in_progress")),
         )
+        .order_by(TkTicket.position)
+    ).all()
+    a_relire = session.exec(
+        select(TkTicket)
+        .where(
+            TkTicket.reporter_id == utilisateur.id,
+            TkTicket.status == "to_validate",
+        )
+        .order_by(TkTicket.position)
     ).all()
 
-    en_retard = [
-        _libelle(t, projets)
-        for t in miens
-        if t.due_date and t.due_date < aujourdhui
-    ]
-    en_cours = [
-        f"{_libelle(t, projets)} ({_anciennete(t, aujourdhui)})"
-        for t in miens
-        if t.status == "in_progress"
-    ]
-    a_valider = [_libelle(t, projets) for t in miens if t.status == "to_validate"]
-    echeances = [
-        _libelle(t, projets)
-        for t in miens
-        if t.due_date in (aujourdhui, demain)
-    ]
-
-    sections = {
-        "Tickets en retard": en_retard,
-        "En cours": en_cours,
-        "À valider": a_valider,
-        "Échéances aujourd'hui et demain": echeances,
+    return {
+        "À faire": [ligne(t) for t in miens if t.status == "todo"],
+        "En cours": [ligne(t, avec_anciennete=True) for t in miens if t.status == "in_progress"],
+        "À valider": [ligne(t) for t in a_relire],
     }
-
-    # L'administrateur voit en plus ce que toute l'équipe lui soumet.
-    if utilisateur.is_admin:
-        equipe = session.exec(
-            select(TkTicket).where(
-                TkTicket.status == "to_validate",
-                TkTicket.assignee_id != utilisateur.id,
-            )
-        ).all()
-        sections["À valider — équipe"] = [_libelle(t, projets) for t in equipe]
-
-    return sections
 
 
 def run(jour: date) -> dict[str, int]:

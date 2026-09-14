@@ -477,7 +477,9 @@ class TicketCreate(BaseModel):
     description: Optional[str] = None
     status: str = "todo"
     priority: str = "medium"
-    assignee_id: Optional[int] = None
+    # Obligatoire : un ticket sans assigne n'est a personne, donc a personne
+    # dans le recap du matin. Le rapporteur est le createur, pose par le serveur.
+    assignee_id: int
     project_id: Optional[int] = None
     due_date: Optional[date] = None
     tag_ids: List[int] = []
@@ -1868,6 +1870,14 @@ def create_ticket(
     verifier_valeur(req.status, TICKET_STATUSES, "Statut")
     verifier_valeur(req.priority, TICKET_PRIORITIES, "Priorite")
     verifier_projet_du_ticket(session, req.project_id, current_user)
+    if req.status == "done" and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seul un administrateur peut terminer un ticket",
+        )
+    assigne = session.get(User, req.assignee_id)
+    if assigne is None or not assigne.is_active:
+        raise HTTPException(status_code=404, detail="Assigne inconnu")
 
     ticket = TkTicket(
         title=req.title,
@@ -1904,6 +1914,14 @@ def update_ticket(
     tag_ids = champs.pop("tag_ids", None)
     if "priority" in champs and champs["priority"] is not None:
         verifier_valeur(champs["priority"], TICKET_PRIORITIES, "Priorite")
+    if "assignee_id" in champs:
+        if champs["assignee_id"] is None:
+            raise HTTPException(
+                status_code=422, detail="Un ticket doit toujours avoir un assigne"
+            )
+        assigne = session.get(User, champs["assignee_id"])
+        if assigne is None or not assigne.is_active:
+            raise HTTPException(status_code=404, detail="Assigne inconnu")
     if "project_id" in champs:
         verifier_projet_du_ticket(session, champs["project_id"], current_user)
 
@@ -1944,6 +1962,13 @@ def move_ticket(
     """
     ticket = ticket_accessible(session, ticket_id, current_user)
     verifier_valeur(req.status, TICKET_STATUSES, "Statut")
+    # Un consultant s'arrete a « a valider » : c'est l'administration qui
+    # prononce le termine, apres relecture par le rapporteur.
+    if req.status == "done" and ticket.status != "done" and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seul un administrateur peut terminer un ticket",
+        )
 
     # Les identifiants recus sont des reperes, pas des positions. On relit la
     # colonne pour trouver la voisine reellement adjacente : sinon deux depots

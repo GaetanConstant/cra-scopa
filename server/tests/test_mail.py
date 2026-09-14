@@ -227,11 +227,7 @@ def test_recap_du_jour_puis_relance_sans_doublon(
 
     client.post(
         "/tickets",
-        json={
-            "title": "Corriger le TACE",
-            "assignee_id": consultant_id,
-            "due_date": "2026-01-01",
-        },
+        json={"title": "Corriger le TACE", "assignee_id": consultant_id},
         headers=entetes_consultant,
     )
 
@@ -272,7 +268,7 @@ def test_preference_decochee_coupe_l_envoi(
 
     client.post(
         "/tickets",
-        json={"title": "X", "assignee_id": consultant_id, "due_date": "2026-01-01"},
+        json={"title": "X", "assignee_id": consultant_id},
         headers=entetes_consultant,
     )
     client.patch(
@@ -412,3 +408,49 @@ def test_le_rappel_glisse_apres_un_week_end_ou_un_ferie() -> None:
     # on glisse au vendredi 21.
     assert jour_de_rappel(2027, 5, {date(2027, 5, 6)}) == date(2027, 5, 20)
     assert jour_de_rappel(2027, 5, {date(2027, 5, 20)}) == date(2027, 5, 21)
+
+
+
+def test_recap_assigne_et_rapporteur(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    admin_id: int,
+    consultant_id: int,
+    mail_actif,
+) -> None:
+    """L'assigné voit ce qu'il a à faire ; le rapporteur, ce qu'il doit relire."""
+    import job_digest
+
+    # L'admin ouvre un ticket pour le consultant, qui le met en cours puis
+    # le soumet ; un second reste à faire.
+    confie = client.post(
+        "/tickets", json={"title": "À relire", "assignee_id": consultant_id},
+        headers=entetes_admin,
+    ).json()
+    client.post(f"/tickets/{confie['id']}/move", json={"status": "to_validate"},
+                headers=entetes_consultant)
+    client.post(
+        "/tickets", json={"title": "Encore à faire", "assignee_id": consultant_id,
+                          "due_date": "2026-01-01"},
+        headers=entetes_admin,
+    )
+
+    job_digest.run(date(2026, 9, 15))
+    par_destinataire = {m["To"]: m.get_body(("plain",)).get_content() for m in FauxSMTP.envoyes}
+
+    consultant = par_destinataire["consultant@test.co"]
+    assert "À FAIRE" in consultant
+    assert "Encore à faire" in consultant
+    assert "EN RETARD" in consultant
+    assert "À relire" not in consultant  # soumis : plus dans sa liste
+
+    admin = par_destinataire["admin@test.co"]
+    assert "À VALIDER" in admin
+    assert "À relire" in admin
+    assert "Encore à faire" not in admin  # pas assigné à lui
+
+
+def test_recap_sans_section_echeances() -> None:
+    contenu = mail_content.digest("A", {"À faire": ["x"]}, "url")
+    assert "aujourd" not in contenu["text"].lower()

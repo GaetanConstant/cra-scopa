@@ -69,6 +69,10 @@ def test_reequilibrage_produit_des_positions_croissantes() -> None:
 
 
 def _ticket(client: TestClient, entetes: dict[str, str], **champs) -> dict:
+    """Crée un ticket pour l'appelant. L'assigné est obligatoire : par défaut
+    c'est l'appelant lui-même, retrouvé via ses préférences."""
+    if "assignee_id" not in champs:
+        champs["assignee_id"] = client.get("/notifications/prefs", headers=entetes).json()["user_id"]
     corps = {"title": "Corriger le calcul du TACE"} | champs
     reponse = client.post("/tickets", json=corps, headers=entetes)
     assert reponse.status_code == 200, reponse.text
@@ -175,7 +179,7 @@ def test_voisine_dans_une_autre_colonne_est_refusee(
 ) -> None:
     a = _ticket(client, entetes_consultant, title="A")
     b = _ticket(client, entetes_consultant, title="B")
-    _deplacer(client, entetes_consultant, a["id"], status="done")
+    _deplacer(client, entetes_consultant, a["id"], status="in_progress")
 
     reponse = client.post(
         f"/tickets/{b['id']}/move",
@@ -211,22 +215,48 @@ def test_insertions_repetees_gardent_l_ordre(
 
 
 def test_retour_en_arriere_permis(
-    client: TestClient, entetes_consultant: dict[str, str]
+    client: TestClient, entetes_admin: dict[str, str]
 ) -> None:
-    ticket = _ticket(client, entetes_consultant)
-    _deplacer(client, entetes_consultant, ticket["id"], status="done")
-    revenu = _deplacer(client, entetes_consultant, ticket["id"], status="todo")
+    ticket = _ticket(client, entetes_admin)
+    _deplacer(client, entetes_admin, ticket["id"], status="done")
+    revenu = _deplacer(client, entetes_admin, ticket["id"], status="todo")
     assert revenu["status"] == "todo"
 
 
-def test_cloture_horodatee_a_l_entree_dans_done(
+def test_consultant_s_arrete_a_a_valider(
     client: TestClient, entetes_consultant: dict[str, str]
 ) -> None:
+    """Décision SCOPA : seul un administrateur prononce le terminé."""
     ticket = _ticket(client, entetes_consultant)
-    fini = _deplacer(client, entetes_consultant, ticket["id"], status="done")
+    _deplacer(client, entetes_consultant, ticket["id"], status="to_validate")
+    reponse = client.post(
+        f"/tickets/{ticket['id']}/move", json={"status": "done"}, headers=entetes_consultant
+    )
+    assert reponse.status_code == 403
+
+
+def test_ticket_sans_assigne_refuse(
+    client: TestClient, entetes_consultant: dict[str, str]
+) -> None:
+    """Un ticket sans assigné n'est à personne, donc dans aucun récap."""
+    reponse = client.post("/tickets", json={"title": "Orphelin"}, headers=entetes_consultant)
+    assert reponse.status_code == 422
+
+    ticket = _ticket(client, entetes_consultant)
+    reponse = client.patch(
+        f"/tickets/{ticket['id']}", json={"assignee_id": None}, headers=entetes_consultant
+    )
+    assert reponse.status_code == 422
+
+
+def test_cloture_horodatee_a_l_entree_dans_done(
+    client: TestClient, entetes_admin: dict[str, str]
+) -> None:
+    ticket = _ticket(client, entetes_admin)
+    fini = _deplacer(client, entetes_admin, ticket["id"], status="done")
     assert fini["closed_at"] is not None
 
-    ressorti = _deplacer(client, entetes_consultant, ticket["id"], status="in_progress")
+    ressorti = _deplacer(client, entetes_admin, ticket["id"], status="in_progress")
     assert ressorti["closed_at"] is None
 
 
@@ -245,7 +275,7 @@ def test_changement_de_statut_journalise(
 
 
 def test_done_borne_aux_trente_derniers_jours(
-    client: TestClient, entetes_consultant: dict[str, str]
+    client: TestClient, entetes_consultant: dict[str, str], entetes_admin: dict[str, str]
 ) -> None:
     from datetime import datetime, timedelta
 
@@ -254,7 +284,7 @@ def test_done_borne_aux_trente_derniers_jours(
     from main import TkTicket, engine
 
     ticket = _ticket(client, entetes_consultant)
-    _deplacer(client, entetes_consultant, ticket["id"], status="done")
+    _deplacer(client, entetes_admin, ticket["id"], status="done")
 
     with Session(engine) as session:
         vieux = session.get(TkTicket, ticket["id"])
@@ -374,8 +404,11 @@ def test_changement_d_etiquettes_journalise(
 def test_etiquette_inconnue_refusee(
     client: TestClient, entetes_consultant: dict[str, str]
 ) -> None:
+    moi = client.get("/notifications/prefs", headers=entetes_consultant).json()["user_id"]
     reponse = client.post(
-        "/tickets", json={"title": "X", "tag_ids": [9999]}, headers=entetes_consultant
+        "/tickets",
+        json={"title": "X", "tag_ids": [9999], "assignee_id": moi},
+        headers=entetes_consultant,
     )
     assert reponse.status_code == 404
 
@@ -445,21 +478,21 @@ def test_commentaire_vide_refuse(
 
 
 def test_done_sans_date_de_cloture_reste_visible(
-    client: TestClient, entetes_consultant: dict[str, str]
+    client: TestClient, entetes_consultant: dict[str, str], entetes_admin: dict[str, str]
 ) -> None:
     """Une carte créée directement en `done` n'a pas de date : ne pas la masquer."""
     from sqlmodel import Session
 
     from main import TkTicket, engine
 
-    ticket = _ticket(client, entetes_consultant, status="done")
+    ticket = _ticket(client, entetes_admin, status="done")
     with Session(engine) as session:
         carte = session.get(TkTicket, ticket["id"])
         carte.closed_at = None
         session.add(carte)
         session.commit()
 
-    board = client.get("/tickets/board", headers=entetes_consultant).json()
+    board = client.get("/tickets/board", headers=entetes_admin).json()
     assert [t["id"] for t in board["done"]] == [ticket["id"]]
 
 

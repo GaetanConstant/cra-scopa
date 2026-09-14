@@ -291,11 +291,8 @@ function Tiroir({ ticketId, utilisateurs, tags, projets, currentUser, onFermer, 
                 id="assigne"
                 className="form-input"
                 value={detail.assignee_id ?? ''}
-                onChange={(e) =>
-                  modifier({ assignee_id: e.target.value ? Number(e.target.value) : null })
-                }
+                onChange={(e) => modifier({ assignee_id: Number(e.target.value) })}
               >
-                <option value="">Personne</option>
                 {utilisateurs.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.full_name}
@@ -438,6 +435,8 @@ export function Tickets({ currentUser }) {
 
   const [ouvert, setOuvert] = useState(null)
   const [nouveauTitre, setNouveauTitre] = useState('')
+  const [nouvelAssigne, setNouvelAssigne] = useState(String(currentUser.id))
+  const [erreurCreation, setErreurCreation] = useState(null)
   // Sous 768 px le glisser-déposer est remplacé par un onglet de statut.
   const [colonneMobile, setColonneMobile] = useState(null)
 
@@ -480,10 +479,21 @@ export function Tickets({ currentUser }) {
   const creer = async (e) => {
     e.preventDefault()
     if (!nouveauTitre.trim()) return
-    await createTicket({ title: nouveauTitre.trim() })
-    setNouveauTitre('')
-    recharger()
+    setErreurCreation(null)
+    try {
+      await createTicket({ title: nouveauTitre.trim(), assignee_id: Number(nouvelAssigne) })
+      setNouveauTitre('')
+      recharger()
+    } catch (err) {
+      setErreurCreation(messageErreur(err, "Le ticket n'a pas été créé"))
+    }
   }
+
+  // Un consultant s'arrête à « À valider » : la colonne Terminé lui est
+  // montrée, pas offerte. Le serveur refuse de toute façon.
+  const colonnesAccessibles = colonnes.filter(
+    (c) => groupBy !== 'status' || c.id !== 'done' || currentUser.is_admin,
+  )
 
   if (loading) {
     return (
@@ -518,10 +528,27 @@ export function Tickets({ currentUser }) {
             onChange={(e) => setNouveauTitre(e.target.value)}
           />
           </div>
+          <div className="w-[170px]">
+            <select
+              className="form-input"
+              value={nouvelAssigne}
+              onChange={(e) => setNouvelAssigne(e.target.value)}
+              aria-label="Assigné"
+            >
+              {utilisateurs.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name}
+                </option>
+              ))}
+            </select>
+          </div>
           <button type="submit" aria-label="Créer" className="btn-primary" style={{ borderRadius: '9999px' }}>
             <Plus size={16} />
           </button>
         </form>
+        {erreurCreation && (
+          <span role="alert" className="text-xs text-danger font-black">{erreurCreation}</span>
+        )}
 
         <div className="flex items-center gap-1 bg-input rounded-2xl p-1">
           {REGROUPEMENTS.map((r) => (
@@ -659,7 +686,7 @@ export function Tickets({ currentUser }) {
                 }}
               >
                 <option value="">Déplacer vers…</option>
-                {colonnes
+                {colonnesAccessibles
                   .filter((c) => c.id !== (colonneMobile ?? colonnes[0]?.id))
                   .map((c) => (
                     <option key={c.id} value={c.id}>

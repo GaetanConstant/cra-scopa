@@ -189,7 +189,12 @@ def test_annuaire_et_referentiel_restent_lisibles(
 
 
 def _ticket(client: TestClient, entetes: dict[str, str], **champs) -> dict:
-    reponse = client.post("/tickets", json={"title": "T", **champs}, headers=entetes)
+    """Crée un ticket pour l'appelant. L'assigné est obligatoire : par défaut
+    c'est l'appelant lui-même, retrouvé via ses préférences."""
+    if "assignee_id" not in champs:
+        champs["assignee_id"] = client.get("/notifications/prefs", headers=entetes).json()["user_id"]
+    corps = {"title": "T"} | champs
+    reponse = client.post("/tickets", json=corps, headers=entetes)
     assert reponse.status_code == 200, reponse.text
     return reponse.json()
 
@@ -291,9 +296,10 @@ def test_consultant_ne_cree_pas_de_ticket_sur_un_projet_non_affecte(
     entetes_consultant: dict[str, str],
 ) -> None:
     autre = _creer_projet(client, entetes_admin, "PROJET DES AUTRES")
+    moi = client.get("/notifications/prefs", headers=entetes_consultant).json()["user_id"]
     reponse = client.post(
         "/tickets",
-        json={"title": "Intrusion", "project_id": autre},
+        json={"title": "Intrusion", "project_id": autre, "assignee_id": moi},
         headers=entetes_consultant,
     )
     assert reponse.status_code == 403
@@ -309,7 +315,9 @@ def test_consultant_cree_un_ticket_sur_sa_mission(
     sien = _creer_projet(client, entetes_admin, "SA MISSION")
     _affecter(client, entetes_admin, consultant_id, sien)
     reponse = client.post(
-        "/tickets", json={"title": "Chez moi", "project_id": sien}, headers=entetes_consultant
+        "/tickets",
+        json={"title": "Chez moi", "project_id": sien, "assignee_id": consultant_id},
+        headers=entetes_consultant,
     )
     assert reponse.status_code == 200
     assert reponse.json()["project_id"] == sien
@@ -329,11 +337,12 @@ def test_consultant_ne_deplace_pas_un_ticket_vers_un_projet_non_affecte(
 
 
 def test_admin_rattache_a_n_importe_quel_projet(
-    client: TestClient, entetes_admin: dict[str, str]
+    client: TestClient, entetes_admin: dict[str, str], admin_id: int
 ) -> None:
     projet = _creer_projet(client, entetes_admin, "N'IMPORTE LEQUEL")
     reponse = client.post(
-        "/tickets", json={"title": "X", "project_id": projet}, headers=entetes_admin
+        "/tickets", json={"title": "X", "project_id": projet, "assignee_id": admin_id},
+        headers=entetes_admin,
     )
     assert reponse.status_code == 200
 
