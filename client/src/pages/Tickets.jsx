@@ -301,6 +301,30 @@ function Tiroir({ ticketId, utilisateurs, tags, projets, currentUser, onFermer, 
               </select>
             </div>
             <div className="form-group col-span-2">
+              <label htmlFor="rapporteur">Rapporteur</label>
+              {currentUser.is_admin ? (
+                <select
+                  id="rapporteur"
+                  className="form-input"
+                  value={detail.reporter_id ?? ''}
+                  onChange={(e) => modifier({ reporter_id: Number(e.target.value) })}
+                >
+                  {utilisateurs.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.full_name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                // Lecture seule pour un consultant : c'est le rapporteur qui
+                // relit, seul un administrateur peut le changer.
+                <p className="form-input" style={{ opacity: 0.7 }}>
+                  {utilisateurs.find((u) => u.id === detail.reporter_id)?.full_name ?? '—'}
+                </p>
+              )}
+            </div>
+
+            <div className="form-group col-span-2">
               <label htmlFor="projet">Projet</label>
               <select
                 id="projet"

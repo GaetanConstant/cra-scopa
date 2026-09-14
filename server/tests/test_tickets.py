@@ -582,3 +582,39 @@ def test_filtre_projet_se_combine_avec_mine(
         f"/tickets/board?mine=true&project_id={projet_id}", headers=entetes_consultant
     ).json()
     assert [t["id"] for t in board["todo"]] == [attendu["id"]]
+
+
+def test_seul_l_admin_change_le_rapporteur(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    consultant_id: int,
+    admin_id: int,
+) -> None:
+    """Changer le rapporteur déplace la responsabilité de la relecture."""
+    ticket = _ticket(client, entetes_consultant)
+    assert ticket["reporter_id"] == consultant_id
+
+    refus = client.patch(
+        f"/tickets/{ticket['id']}", json={"reporter_id": admin_id}, headers=entetes_consultant
+    )
+    assert refus.status_code == 403
+
+    ok = client.patch(
+        f"/tickets/{ticket['id']}", json={"reporter_id": admin_id}, headers=entetes_admin
+    )
+    assert ok.status_code == 200
+    assert ok.json()["reporter_id"] == admin_id
+
+    detail = client.get(f"/tickets/{ticket['id']}", headers=entetes_admin).json()
+    assert "reporter_changed" in [e["kind"] for e in detail["events"]]
+
+
+def test_rapporteur_ne_peut_pas_etre_vide(
+    client: TestClient, entetes_admin: dict[str, str]
+) -> None:
+    ticket = _ticket(client, entetes_admin)
+    reponse = client.patch(
+        f"/tickets/{ticket['id']}", json={"reporter_id": None}, headers=entetes_admin
+    )
+    assert reponse.status_code == 422

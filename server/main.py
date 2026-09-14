@@ -490,6 +490,7 @@ class TicketUpdate(BaseModel):
     description: Optional[str] = None
     priority: Optional[str] = None
     assignee_id: Optional[int] = None
+    reporter_id: Optional[int] = None  # administration seule
     project_id: Optional[int] = None
     due_date: Optional[date] = None
     tag_ids: Optional[List[int]] = None
@@ -1922,6 +1923,26 @@ def update_ticket(
         assigne = session.get(User, champs["assignee_id"])
         if assigne is None or not assigne.is_active:
             raise HTTPException(status_code=404, detail="Assigne inconnu")
+    if "reporter_id" in champs:
+        # Le rapporteur est celui qui relit : le changer deplace la
+        # responsabilite de la validation, ce n'est pas au consultant de le faire.
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Seul un administrateur peut changer le rapporteur",
+            )
+        if champs["reporter_id"] is None:
+            raise HTTPException(
+                status_code=422, detail="Un ticket doit toujours avoir un rapporteur"
+            )
+        rapporteur = session.get(User, champs["reporter_id"])
+        if rapporteur is None or not rapporteur.is_active:
+            raise HTTPException(status_code=404, detail="Rapporteur inconnu")
+        if champs["reporter_id"] != ticket.reporter_id:
+            journaliser(
+                session, ticket.id, current_user.id, "reporter_changed",
+                str(champs["reporter_id"]),
+            )
     if "project_id" in champs:
         verifier_projet_du_ticket(session, champs["project_id"], current_user)
 
