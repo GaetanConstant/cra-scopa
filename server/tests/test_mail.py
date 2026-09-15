@@ -272,6 +272,25 @@ def test_une_simulation_ne_bloque_pas_le_vrai_envoi(
     assert len(FauxSMTP.envoyes) == 1
 
 
+def test_une_echeance_hors_annee_affiche_l_annee(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    consultant_id: int,
+    mail_actif,
+) -> None:
+    """Une année mal saisie (2016 pour 2026) doit sauter aux yeux."""
+    import job_digest
+
+    client.post(
+        "/tickets",
+        json={"title": "Certif PL300", "assignee_id": consultant_id, "due_date": "2016-10-08"},
+        headers=entetes_admin,
+    )
+    job_digest.run(date(2026, 9, 15))
+    texte = FauxSMTP.envoyes[0].get_body(("plain",)).get_content()
+    assert "échéance 08/10/2016 — EN RETARD" in texte
+
+
 def test_recap_ignore_le_week_end(mail_actif) -> None:
     import job_digest
 
@@ -519,7 +538,7 @@ def test_recap_assigne_et_rapporteur(
     consultant = par_destinataire["consultant@test.co"]
     assert "À FAIRE" in consultant
     assert "Encore à faire" in consultant
-    assert "EN RETARD" in consultant
+    assert "échéance 01/01 — EN RETARD" in consultant  # même année : sans l'année
     assert "À relire" not in consultant  # soumis : plus dans sa liste
 
     admin = par_destinataire["admin@test.co"]

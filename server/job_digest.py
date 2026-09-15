@@ -36,10 +36,16 @@ logger = logging.getLogger(__name__)
 KIND = "daily_digest"
 
 
-def _libelle(ticket: TkTicket, projets: dict[int, Project]) -> str:
+def _libelle(ticket: TkTicket, projets: dict[int, Project], aujourdhui: date) -> str:
+    """L'année n'apparaît que hors de l'année en cours : une échéance
+    « 08/10 — EN RETARD » un 15 septembre cache une faute de frappe sur
+    l'année, « 08/10/2016 » la montre."""
     projet = projets.get(ticket.project_id)
     suffixe = f" [{projet.code or projet.name}]" if projet else ""
-    echeance = f" — échéance {ticket.due_date:%d/%m}" if ticket.due_date else ""
+    echeance = ""
+    if ticket.due_date:
+        forme = "%d/%m" if ticket.due_date.year == aujourdhui.year else "%d/%m/%Y"
+        echeance = f" — échéance {ticket.due_date:{forme}}"
     return f"#{ticket.id} {ticket.title}{suffixe}{echeance}"
 
 
@@ -63,7 +69,7 @@ def sections_pour(
     projets = {p.id: p for p in session.exec(select(Project)).all()}
 
     def ligne(t: TkTicket, avec_anciennete: bool = False) -> str:
-        texte = _libelle(t, projets)
+        texte = _libelle(t, projets, aujourdhui)
         if t.due_date and t.due_date < aujourdhui:
             texte += " — EN RETARD"
         if avec_anciennete:
