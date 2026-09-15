@@ -1323,7 +1323,9 @@ def envoyer_et_journaliser(
     """Envoie un message et en garde la trace.
 
     L'unicite (user_id, kind, ref_date) est verifiee avant l'envoi : c'est
-    elle qui rend les jobs rejouables sans doublon.
+    elle qui rend les jobs rejouables sans doublon. Seul un envoi reel
+    bloque : une simulation (dry_run) ou un echec SMTP laissent la place au
+    vrai envoi, qui reprend la ligne.
     """
     deja = session.exec(
         select(EmailLog).where(
@@ -1332,7 +1334,7 @@ def envoyer_et_journaliser(
             EmailLog.ref_date == ref_date,
         )
     ).first()
-    if deja is not None:
+    if deja is not None and deja.status == "sent":
         return "skipped"
 
     config = config_mail()
@@ -1349,15 +1351,12 @@ def envoyer_et_journaliser(
         statut, erreur = "error", str(exc)
         logger.error("Envoi %s a %s en echec : %s", kind, destinataire, exc)
 
-    session.add(
-        EmailLog(
-            user_id=user_id,
-            kind=kind,
-            ref_date=ref_date,
-            status=statut,
-            error=erreur,
-        )
-    )
+    if deja is None:
+        deja = EmailLog(user_id=user_id, kind=kind, ref_date=ref_date, status=statut)
+    deja.status = statut
+    deja.error = erreur
+    deja.created_at = datetime.now()
+    session.add(deja)
     session.commit()
     return statut
 
@@ -1413,6 +1412,31 @@ def notifier_demande_conge(leave_id: int) -> None:
                 admin.email,
                 "leave_request",
                 f"{leave_id}",
+                contenu,
+            )
+
+
+def notifier_cloture(user_id: int, periode: str, closed_by: int) -> None:
+    """Previens les administrateurs qu'un mois vient d'etre cloture.
+
+    Celui qui a cloture n'est pas prevenu de son propre geste.
+    """
+    with Session(engine) as session:
+        utilisateur = session.get(User, user_id)
+        contenu = mail_content.month_closed_notice(
+            utilisateur.full_name if utilisateur else "Un consultant",
+            periode,
+            f"{config_mail().base_url}",
+        )
+        for admin in session.exec(select(User).where(User.is_admin == True)).all():  # noqa: E712
+            if admin.id == closed_by:
+                continue
+            envoyer_et_journaliser(
+                session,
+                admin.id,
+                admin.email,
+                "month_closed",
+                f"{user_id}:{periode}",
                 contenu,
             )
 
@@ -2230,6 +2254,7 @@ def read_timesheet(
 @app.post("/time/close")
 def close_period(
     req: ClosePeriod,
+    background: BackgroundTasks,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -2278,6 +2303,7 @@ def close_period(
     cloture.closed_by = current_user.id
     session.add(cloture)
     session.commit()
+    background.add_task(notifier_cloture, cible, req.period, current_user.id)
     return {"status": "closed", "period": req.period, "user_id": cible}
 
 

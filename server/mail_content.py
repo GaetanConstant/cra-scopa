@@ -184,35 +184,41 @@ def digest(nom: str, sections: Mapping[str, Sequence[str]], lien: str) -> dict |
 def closing_reminder(
     nom: str, periode: str, jours_manquants: Sequence[date], lien: str
 ) -> dict:
-    """Rappel de clôture du 20, motivé par la paie.
+    """Rappel de clôture, le 18 puis le 20, motivé par la paie.
 
     Le motif est dit explicitement : « clôturez votre CRA » sans raison se
     range dans les tâches qu'on remet à demain, « les salaires en dépendent »
     beaucoup moins.
     """
     urgence = "Les salaires du mois sont établis à partir des CRA clôturés."
+    consigne = (
+        "Une fois le mois complet, cliquez sur « Clôturer le mois » "
+        "en haut de votre CRA."
+    )
 
     if jours_manquants:
         sujet = f"CRA {periode} — {len(jours_manquants)} jour(s) à compléter avant clôture"
         detail = [j.strftime("%d/%m") for j in jours_manquants]
-        corps_html = _encadre(urgence, CORAIL) + _section_html(
-            "Jours ouvrés non couverts sur le mois", detail, CORAIL
+        corps_html = (
+            _encadre(urgence, CORAIL)
+            + _section_html("Jours ouvrés non couverts sur le mois", detail, CORAIL)
+            + f'<p style="margin:0 0 16px">{consigne}</p>'
         )
         texte = (
             f"Bonjour {nom},\n\n{urgence}\n\n"
             f"Il reste {len(jours_manquants)} jour(s) ouvré(s) sans saisie ni "
-            f"absence sur {periode} :\n" + "\n".join(f"  - {d}" for d in detail)
+            f"absence sur {periode} :\n"
+            + "\n".join(f"  - {d}" for d in detail)
+            + f"\n\n{consigne}"
         )
     else:
         sujet = f"CRA {periode} — à clôturer"
         corps_html = _encadre(urgence) + (
-            f'<p style="margin:0 0 16px">Votre CRA est complet, '
-            f"il ne reste qu'à le clôturer.</p>"
+            f'<p style="margin:0 0 16px">Votre CRA est complet : {consigne}</p>'
         )
         texte = (
             f"Bonjour {nom},\n\n{urgence}\n\n"
-            f"Votre CRA de {periode} est complet, "
-            f"il ne reste qu'à le clôturer."
+            f"Votre CRA de {periode} est complet : {consigne}"
         )
 
     return {
@@ -221,6 +227,18 @@ def closing_reminder(
         "html": _coquille(
             f"CRA {periode}", corps_html, lien, accroche=f"Bonjour {nom}"
         ),
+    }
+
+
+def month_closed_notice(nom: str, periode: str, lien: str) -> dict:
+    """Un consultant a clôturé son mois, envoyé aux administrateurs."""
+    sujet = f"CRA {periode} clôturé — {nom}"
+    texte = f"{nom} a clôturé son CRA de {periode}."
+    corps_html = _encadre(texte, VERT)
+    return {
+        "subject": sujet,
+        "text": f"{texte}\n\n{lien}",
+        "html": _coquille(f"CRA {periode} clôturé", corps_html, lien),
     }
 
 
