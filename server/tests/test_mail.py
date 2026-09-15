@@ -550,3 +550,40 @@ def test_recap_assigne_et_rapporteur(
 def test_recap_sans_section_echeances() -> None:
     contenu = mail_content.digest("A", {"À faire": ["x"]}, "url")
     assert "aujourd" not in contenu["text"].lower()
+
+
+def test_le_rapporteur_voit_ce_qui_est_en_cours_chez_les_autres(
+    admin_id: int, consultant_id: int
+) -> None:
+    """Un ticket en cours chez quelqu'un d'autre remonte au rapporteur ; celui
+    qu'il s'est assigné lui-même reste dans « En cours », sans doublon."""
+    from job_digest import sections_pour
+    from main import User
+
+    with Session(engine) as session:
+        session.add(
+            TkTicket(
+                title="Chez le consultant",
+                status="in_progress",
+                reporter_id=admin_id,
+                assignee_id=consultant_id,
+                updated_at=datetime.now() - timedelta(days=3),
+            )
+        )
+        session.add(
+            TkTicket(
+                title="Chez moi", status="in_progress", reporter_id=admin_id, assignee_id=admin_id
+            )
+        )
+        session.add(
+            TkTicket(title="Pas commencé", status="todo", reporter_id=admin_id, assignee_id=consultant_id)
+        )
+        session.commit()
+        sections = sections_pour(session, session.get(User, admin_id), date.today())
+
+    assert any("Chez moi" in l for l in sections["En cours"])
+    (ligne,) = sections["En cours chez les autres"]
+    assert "Chez le consultant" in ligne
+    assert "Consultant" in ligne
+    assert "depuis 3 jours" in ligne
+    assert not any("Chez moi" in l for l in sections["En cours chez les autres"])

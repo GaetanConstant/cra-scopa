@@ -63,10 +63,13 @@ def sections_pour(
 
     Comme assigne : ce qu'il a a faire et ce qu'il a en cours, tous les jours
     tant que la liste n'est pas vide. Comme rapporteur : ce qui attend sa
-    relecture. Une echeance depassee est signalee sur la ligne plutot que
-    dans une section a part.
+    relecture, et ce que les autres ont en cours pour lui — un ticket qui
+    stagne chez quelqu'un d'autre se voit ainsi sans ouvrir le kanban. Une
+    echeance depassee est signalee sur la ligne plutot que dans une section
+    a part.
     """
     projets = {p.id: p for p in session.exec(select(Project)).all()}
+    noms = {u.id: u.full_name for u in session.exec(select(User)).all()}
 
     def ligne(t: TkTicket, avec_anciennete: bool = False) -> str:
         texte = _libelle(t, projets, aujourdhui)
@@ -84,19 +87,31 @@ def sections_pour(
         )
         .order_by(TkTicket.position)
     ).all()
-    a_relire = session.exec(
+    rapportes = session.exec(
         select(TkTicket)
         .where(
             TkTicket.reporter_id == utilisateur.id,
-            TkTicket.status == "to_validate",
+            TkTicket.status.in_(("in_progress", "to_validate")),
         )
         .order_by(TkTicket.position)
     ).all()
+    a_relire = [t for t in rapportes if t.status == "to_validate"]
+    # Ce qu'il s'est assigne a lui-meme est deja dans « En cours ».
+    chez_les_autres = [
+        t
+        for t in rapportes
+        if t.status == "in_progress" and t.assignee_id != utilisateur.id
+    ]
+
+    def ligne_chez(t: TkTicket) -> str:
+        qui = noms.get(t.assignee_id, "non assigné")
+        return f"{ligne(t)} — {qui} ({_anciennete(t, aujourdhui)})"
 
     return {
         "À faire": [ligne(t) for t in miens if t.status == "todo"],
         "En cours": [ligne(t, avec_anciennete=True) for t in miens if t.status == "in_progress"],
         "À valider": [ligne(t) for t in a_relire],
+        "En cours chez les autres": [ligne_chez(t) for t in chez_les_autres],
     }
 
 
