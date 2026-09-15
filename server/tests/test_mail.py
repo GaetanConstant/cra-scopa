@@ -241,6 +241,37 @@ def test_recap_du_jour_puis_relance_sans_doublon(
     assert len(FauxSMTP.envoyes) == envoyes
 
 
+def test_une_simulation_ne_bloque_pas_le_vrai_envoi(
+    client: TestClient,
+    entetes_consultant: dict[str, str],
+    consultant_id: int,
+    mail_actif,
+    monkeypatch,
+) -> None:
+    """Un `job_digest.py 2026-09-15` lancé la veille en dry_run journalise
+    une ligne ; le vrai run du 15 doit quand même envoyer."""
+    import job_digest
+
+    client.post(
+        "/tickets",
+        json={"title": "Corriger le TACE", "assignee_id": consultant_id},
+        headers=entetes_consultant,
+    )
+    jour = date(2026, 9, 15)
+
+    monkeypatch.setenv("MAIL_DRY_RUN", "true")
+    assert job_digest.run(jour).get("dry_run") == 1
+    assert FauxSMTP.envoyes == []
+
+    monkeypatch.setenv("MAIL_DRY_RUN", "false")
+    assert job_digest.run(jour).get("sent") == 1
+    assert len(FauxSMTP.envoyes) == 1
+
+    # Et une fois vraiment parti, on ne renvoie plus.
+    assert job_digest.run(jour).get("skipped") == 1
+    assert len(FauxSMTP.envoyes) == 1
+
+
 def test_recap_ignore_le_week_end(mail_actif) -> None:
     import job_digest
 
@@ -318,11 +349,13 @@ def test_rappel_saute_les_periodes_cloturees(
     assert resultats.get("cloture", 0) == 1
 
 
-def test_le_rappel_tombe_le_vingt_sur_le_mois_en_cours() -> None:
+def test_les_rappels_tombent_le_dix_huit_et_le_vingt_sur_le_mois_en_cours() -> None:
     from job_closing_reminder import periode_a_rappeler
 
-    # 20 octobre 2026 est un mardi : le rappel part ce jour-là.
+    # Octobre 2026 : le 18 est un dimanche (→ vendredi 16), le 20 un mardi.
+    assert periode_a_rappeler(date(2026, 10, 16)) == "2026-10"
     assert periode_a_rappeler(date(2026, 10, 20)) == "2026-10"
+    assert periode_a_rappeler(date(2026, 10, 18)) is None
     assert periode_a_rappeler(date(2026, 10, 19)) is None
     assert periode_a_rappeler(date(2026, 10, 21)) is None
     assert periode_a_rappeler(date(2026, 10, 30)) is None
@@ -334,14 +367,47 @@ def test_le_rappel_couvre_tout_le_mois(
     """Le CRA se remplit par anticipation : les jours à venir comptent aussi."""
     import job_closing_reminder
 
-    # Le 20 est un dimanche, le rappel part le lundi 21.
-    job_closing_reminder.run(date(2026, 9, 21))
+    # Le 20 est un dimanche, le rappel recule au vendredi 18.
+    job_closing_reminder.run(date(2026, 9, 18))
     message = next(m for m in FauxSMTP.envoyes if "à compléter" in m["Subject"])
     texte = message.get_body(("plain",)).get_content()
     # Septembre 2026 : 22 jours ouvrés, du 1er au 30, aucun férié.
     assert "22 jour(s)" in texte
     assert "30/09" in texte
     assert "salaires" in texte
+
+
+def test_la_cloture_previent_les_administrateurs(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    consultant_id: int,
+    mail_actif,
+) -> None:
+    from test_timesheet import _affecter, _projet, _remplir_le_mois
+
+    projet = _projet(client, entetes_admin)
+    _affecter(client, entetes_admin, consultant_id, projet["id"])
+    _remplir_le_mois(client, entetes_consultant, consultant_id, projet["id"])
+    reponse = client.post(
+        "/time/close", json={"period": "2026-06"}, headers=entetes_consultant
+    )
+    assert reponse.status_code == 200, reponse.text
+
+    message = next(m for m in FauxSMTP.envoyes if "clôturé" in m["Subject"])
+    assert message["To"] == "admin@test.co"
+    assert "2026-06" in message["Subject"]
+
+
+def test_le_rappel_nomme_le_bouton_de_cloture() -> None:
+    import mail_content
+
+    complet = mail_content.closing_reminder("Ana", "2026-09", [], "https://cra")
+    incomplet = mail_content.closing_reminder(
+        "Ana", "2026-09", [date(2026, 9, 30)], "https://cra"
+    )
+    assert "Clôturer le mois" in complet["text"]
+    assert "Clôturer le mois" in incomplet["text"]
 
 
 def test_preferences_par_defaut(
@@ -396,18 +462,29 @@ def test_recap_ignore_les_feries(mail_actif) -> None:
     assert job_digest.run(date(2026, 11, 11)) == {"ferie": 1}
 
 
-def test_le_rappel_glisse_apres_un_week_end_ou_un_ferie() -> None:
-    from job_closing_reminder import jour_de_rappel, periode_a_rappeler
+def test_le_rappel_recule_avant_un_week_end_ou_un_ferie() -> None:
+    from job_closing_reminder import jours_de_rappel, periode_a_rappeler
 
-    # 20 septembre 2026 est un dimanche : le rappel part le lundi 21.
-    assert jour_de_rappel(2026, 9, set()) == date(2026, 9, 21)
+    # 20 septembre 2026 est un dimanche : il recule au vendredi 18, qui est
+    # aussi le premier rappel. Un seul envoi, jamais le lundi 21.
+    assert jours_de_rappel(2026, 9, set()) == [date(2026, 9, 18)]
+    assert periode_a_rappeler(date(2026, 9, 18)) == "2026-09"
     assert periode_a_rappeler(date(2026, 9, 20)) is None
-    assert periode_a_rappeler(date(2026, 9, 21)) == "2026-09"
+    assert periode_a_rappeler(date(2026, 9, 21)) is None
+
+    # 20 mars 2027 est un samedi : le 18 (jeudi) reste, le 20 recule au 19.
+    assert jours_de_rappel(2027, 3, set()) == [date(2027, 3, 18), date(2027, 3, 19)]
 
     # 20 mai 2027 tombe un jeudi de l'Ascension (Pâques le 28 mars 2027 + 39) :
-    # on glisse au vendredi 21.
-    assert jour_de_rappel(2027, 5, {date(2027, 5, 6)}) == date(2027, 5, 20)
-    assert jour_de_rappel(2027, 5, {date(2027, 5, 20)}) == date(2027, 5, 21)
+    # il recule au mercredi 19 ; le 18 (mardi) reste.
+    assert jours_de_rappel(2027, 5, {date(2027, 5, 6)}) == [
+        date(2027, 5, 18),
+        date(2027, 5, 20),
+    ]
+    assert jours_de_rappel(2027, 5, {date(2027, 5, 20)}) == [
+        date(2027, 5, 18),
+        date(2027, 5, 19),
+    ]
 
 
 

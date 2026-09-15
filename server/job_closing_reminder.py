@@ -1,13 +1,19 @@
-"""Rappel de clôture du CRA, le 20 de chaque mois.
+"""Rappels de clôture du CRA, le 18 et le 20 de chaque mois.
 
     uv run python job_closing_reminder.py            # décide selon la date
-    uv run python job_closing_reminder.py 2026-09-20 # simule un jour donné
+    uv run python job_closing_reminder.py 2026-09-18 # simule un jour donné
     uv run python job_closing_reminder.py --force 2026-09
 
-Le rappel part le 20, sur le mois en cours : les salaires sont établis à
-partir des CRA clôturés, il faut donc que chacun ait arrêté le sien avant la
-paie. Les jours manquants couvrent **tout le mois**, jours à venir compris :
-le CRA se remplit par anticipation et se clôture avant la fin du mois.
+Deux rappels, le 18 et le 20, sur le mois en cours : les salaires sont
+établis à partir des CRA clôturés, il faut donc que chacun ait arrêté le
+sien avant la paie. Les jours manquants couvrent **tout le mois**, jours à
+venir compris : le CRA se remplit par anticipation et se clôture avant la
+fin du mois.
+
+Quand une date tombe un week-end ou un férié, le rappel **recule** au jour
+ouvré précédent — jamais après : un rappel lu le lundi 21 arrive trop tard.
+Le 18 et le 20 ne peuvent pas être tous deux un week-end (deux jours
+d'écart) ; s'ils reculent sur le même jour ouvré, un seul mail part.
 
 Le job ne fait rien les autres jours : le timer systemd peut tourner tous
 les matins sans réfléchir, c'est ici qu'on décide.
@@ -37,28 +43,34 @@ from timesheet import missing_working_days, period_bounds
 logger = logging.getLogger(__name__)
 
 KIND = "closing_reminder"
-JOUR_DU_RAPPEL = 20
+JOURS_DE_RAPPEL = (18, 20)
 
 
-def jour_de_rappel(annee: int, mois: int, feries: set[date]) -> date:
-    """Premier jour ouvré du mois à partir du 20.
+def jour_ouvre_avant(jour: date, feries: set[date]) -> date:
+    """Le jour lui-même s'il est ouvré, sinon le dernier jour ouvré avant."""
+    while jour.weekday() >= 5 or jour in feries:
+        jour -= timedelta(days=1)
+    return jour
+
+
+def jours_de_rappel(annee: int, mois: int, feries: set[date]) -> list[date]:
+    """Jours d'envoi du mois, dédoublonnés et triés.
 
     Un rappel envoyé un dimanche est lu le lundi au milieu d'autre chose ;
-    un rappel envoyé le lundi est lu le lundi.
+    on préfère le vendredi, quand il reste du temps pour agir.
     """
-    jour = date(annee, mois, JOUR_DU_RAPPEL)
-    while jour.weekday() >= 5 or jour in feries:
-        jour += timedelta(days=1)
-    return jour
+    return sorted(
+        {jour_ouvre_avant(date(annee, mois, j), feries) for j in JOURS_DE_RAPPEL}
+    )
 
 
 def periode_a_rappeler(jour: date, feries: set[date] = frozenset()) -> str | None:
     """Période concernée par un rappel ce jour-là, ou None.
 
-    Le rappel porte sur le mois en cours, le premier jour ouvré à partir du
-    20. Les autres jours, rien.
+    Le rappel porte sur le mois en cours, le dernier jour ouvré jusqu'au 18
+    puis jusqu'au 20. Les autres jours, rien.
     """
-    if jour != jour_de_rappel(jour.year, jour.month, feries):
+    if jour not in jours_de_rappel(jour.year, jour.month, feries):
         return None
     return f"{jour.year:04d}-{jour.month:02d}"
 
@@ -75,9 +87,12 @@ def run(jour: date, force_periode: str | None = None) -> dict[str, int]:
         periode = force_periode or periode_a_rappeler(jour, feries_du_mois)
         if periode is None:
             logger.info(
-                "%s n'est pas le jour de rappel (%s).",
+                "%s n'est pas un jour de rappel (%s).",
                 jour,
-                jour_de_rappel(jour.year, jour.month, feries_du_mois),
+                ", ".join(
+                    d.isoformat()
+                    for d in jours_de_rappel(jour.year, jour.month, feries_du_mois)
+                ),
             )
             return {"hors_calendrier": 1}
 
