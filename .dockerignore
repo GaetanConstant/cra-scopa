@@ -1,0 +1,7 @@
+# Contexte de build du front = racine du dépôt (pour lire VERSION) :
+# on n'embarque que client/ et VERSION.
+*
+!client
+!VERSION
+client/node_modules
+client/dist
