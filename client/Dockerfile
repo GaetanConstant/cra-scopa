@@ -1,9 +1,10 @@
 # Étape 1 : Construction de l'app React (Vite)
 FROM node:20-slim AS build
 WORKDIR /app
-COPY package*.json ./
+COPY client/package*.json ./
 RUN npm install
-COPY . .
+COPY client/ .
+COPY VERSION /VERSION
 RUN npm run build
 
 # Étape 2 : Service avec Nginx unifié (3300)

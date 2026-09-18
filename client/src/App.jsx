@@ -437,11 +437,14 @@ function App() {
               alt="SCOPA"
               style={{ margin: '0 auto 1rem', height: '56px', objectFit: 'contain', display: 'block' }}
             />
-            <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.25rem' }}>
-              Connexion
+            <h1 style={{ fontSize: '1.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-main)', marginBottom: '0.25rem' }}>
+              CRA
             </h1>
-            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-              Entrez vos identifiants pour accéder au CRA SCOPA
+            <p style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+              Compte Rendu d'Activité
+            </p>
+            <p style={{ fontSize: '0.62rem', color: 'var(--text-muted)' }}>
+              © {__APP_YEAR__} SCOPA — v{__APP_VERSION__}
             </p>
           </div>
 
@@ -464,7 +467,7 @@ function App() {
                 onChange={e => setLoginForm({ ...loginForm, username: e.target.value })}
                 required
                 autoComplete="username"
-                placeholder="gconstant"
+                placeholder="totoenvacances"
               />
             </div>
 

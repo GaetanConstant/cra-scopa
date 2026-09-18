@@ -14,7 +14,11 @@ services:
     restart: always
 
   frontend:
-    build: ./client
+    # Contexte à la racine : le build lit VERSION, source unique du numéro
+    # affiché dans l'app (voir CHANGELOG.md).
+    build:
+      context: .
+      dockerfile: client/Dockerfile
     container_name: scopa-frontend
     ports:
       - "3300:3300"
