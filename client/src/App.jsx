@@ -520,6 +520,7 @@ function App() {
     if (!meta) return null
     const trous = meta.missing_days ?? []
     const surcharges = Object.entries(meta.overloaded_days ?? {})
+    const conflits = Object.keys(meta.conflict_days ?? {})
 
     return (
       <div className="flex flex-col gap-3 mb-8">
@@ -534,6 +535,14 @@ function App() {
               {trous.length} jour{trous.length > 1 ? 's' : ''} ouvré{trous.length > 1 ? 's' : ''} sans saisie ni absence
             </span>
             <span className="text-ink-muted"> — {trous.map(j => j.slice(8)).join(', ')}</span>
+          </div>
+        )}
+        {conflits.length > 0 && (
+          <div role="status" className="bg-card border-2 border-warning rounded-2xl px-6 py-4 text-sm">
+            <span className="font-black uppercase tracking-widest text-warning">
+              {conflits.length} jour{conflits.length > 1 ? 's' : ''} d'absence avec une saisie
+            </span>
+            <span className="text-ink-muted"> — {conflits.map(j => j.slice(8)).join(', ')} : à effacer avant de clôturer</span>
           </div>
         )}
         {surcharges.length > 0 && (
@@ -619,7 +628,9 @@ function App() {
                 </div>
               )}
 
-              {!ferie && !absent && activeRows.map(row => {
+              {/* Sur un jour d'absence, seules les saisies restees en conflit
+                  apparaissent, pour pouvoir les effacer. */}
+              {!ferie && activeRows.filter(row => !absent || (gridData[row.key]?.[dateStr] || 0) > 0).map(row => {
                 const valeur = gridData[row.key]?.[dateStr] || 0
                 const nom = row.project_id
                   ? (projects.find(p => p.id === row.project_id)?.name || row.activity_type)
@@ -804,19 +815,22 @@ function App() {
                       // Journee entierement couverte par une absence approuvee :
                       // il n'y a plus rien a imputer dessus.
                       const absent = (chargeAbsences[dateStr] ?? 0) >= 1;
-                      const verrouille = meta?.closed || absent;
+                      // Une saisie restee sur un jour d'absence bloque la cloture :
+                      // on la montre pour qu'elle puisse etre effacee.
+                      const conflit = absent && val > 0;
+                      const verrouille = meta?.closed || (absent && !conflit);
                       return (
                         <td
                           key={dateStr}
-                          title={absent ? 'Absence approuvée' : (ferie ? 'Jour férié' : undefined)}
-                          className={`p-2 border-r border-line ${weekend || ferie ? 'bg-input opacity-30 grayscale' : ''} ${absent ? 'bg-primary-soft' : ''}`}
+                          title={conflit ? 'Saisie sur un jour d\'absence : à effacer' : absent ? 'Absence approuvée' : (ferie ? 'Jour férié' : undefined)}
+                          className={`p-2 border-r border-line ${weekend || ferie ? 'bg-input opacity-30 grayscale' : ''} ${absent ? 'bg-primary-soft' : ''} ${conflit ? 'border-2 border-warning' : ''}`}
                         >
-                          {!weekend && !ferie && absent && (
+                          {!weekend && !ferie && absent && !conflit && (
                             <div className="text-center text-[10px] font-black uppercase tracking-widest text-primary">
                               Absent
                             </div>
                           )}
-                          {!weekend && !ferie && !absent && (
+                          {!weekend && !ferie && (!absent || conflit) && (
                             <input
                               type="text"
                               readOnly={verrouille}

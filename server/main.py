@@ -7,6 +7,7 @@ from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel, create_engine, Session, select
 from sqlalchemy.orm import selectinload
 from fastapi import BackgroundTasks, FastAPI, Depends, HTTPException, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials
@@ -21,6 +22,7 @@ from mailer import MailConfig, MailError, send as envoyer_mail
 from timesheet import (
     TimesheetError,
     check_quantities,
+    leave_conflicts,
     missing_working_days,
     overloaded_days,
     period_bounds,
@@ -1128,6 +1130,17 @@ def decide_leave(
             status_code=409,
             detail=f"Cette demande est deja {demande.status}",
         )
+
+    # Valider ajoute une absence au decompte : sur un mois cloture, ce serait
+    # modifier un CRA deja arrete, comme le refuse deja le depot (§6).
+    if req.approve:
+        periodes = {period_of(demande.start_date), period_of(demande.end_date)}
+        for periode in sorted(periodes):
+            if periode_verrouillee(session, demande.user_id, periode):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"La periode {periode} est cloturee. Un administrateur doit la rouvrir avant de valider.",
+                )
 
     demande.status = "approved" if req.approve else "rejected"
     demande.decided_by = admin.id
@@ -2242,6 +2255,12 @@ def read_timesheet(
                 [(l.date, l.duration_factor) for l in lignes], absences
             ).items()
         },
+        "conflict_days": {
+            str(j): v
+            for j, v in leave_conflicts(
+                [(l.date, l.duration_factor) for l in lignes], absences
+            ).items()
+        },
         "missing_days": [
             str(j)
             for j in missing_working_days(
@@ -2292,6 +2311,37 @@ def close_period(
             detail={
                 "message": "Des jours ouvres ne sont ni saisis ni couverts par une absence",
                 "missing_days": [str(j) for j in trous],
+            },
+        )
+
+    # Un conge en attente peut encore changer le decompte du mois : il doit
+    # etre valide ou refuse avant que le mois soit arrete.
+    en_attente = session.exec(
+        select(LeaveRequest).where(
+            LeaveRequest.user_id == cible,
+            LeaveRequest.status == "pending",
+            LeaveRequest.end_date >= debut,
+            LeaveRequest.start_date <= fin,
+        )
+    ).all()
+    if en_attente:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Un conge du mois attend encore sa validation",
+                "pending_leaves": jsonable_encoder([demande_en_dict(d) for d in en_attente]),
+            },
+        )
+
+    conflits = leave_conflicts(
+        [(l.date, l.duration_factor) for l in lignes], absences
+    )
+    if conflits:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Des jours d'absence portent aussi une saisie",
+                "conflict_days": {str(j): v for j, v in conflits.items()},
             },
         )
 

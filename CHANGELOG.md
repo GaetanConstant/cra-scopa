@@ -6,6 +6,12 @@ de connexion. Les entrées décrivent le changement pour l'utilisateur.
 
 Format d'une entrée : `## vX.Y.Z — <date ISO> — <titre>`.
 
+## v2.2.2 — 2026-10-21 — Clôture et congés
+### Corrigé
+- Un mois ne se clôture plus tant qu'un de ses congés attend une décision.
+- Un mois ne se clôture plus si un jour d'absence porte aussi une saisie ; ces jours sont signalés et la saisie redevient visible pour être effacée.
+- Un congé ne peut plus être validé sur un mois déjà clôturé : il faut d'abord le rouvrir.
+
 ## v2.2.1 — 2026-09-18 — Page de connexion
 ### Modifié
 - La page de connexion affiche « CRA — Compte Rendu d'Activité » sous le logo, avec l'année et la version.
