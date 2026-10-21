@@ -9,6 +9,7 @@ import {
   getTimesheet,
   messageErreur,
   patchPrefs,
+  reopenPeriod,
   testDigest,
 } from './api/client'
 import { BlocConges, DemandeCongeModal } from './pages/Conges'
@@ -365,6 +366,37 @@ function App() {
       await chargerMeta()
     } finally {
       setMetaBusy(false)
+    }
+  }
+
+  // Etat de cloture du consultant en revue : seul l'admin peut rouvrir un
+  // mois, et c'est depuis sa fiche qu'il le fait.
+  const [revueMeta, setRevueMeta] = useState(null)
+  const [revueBusy, setRevueBusy] = useState(false)
+  const [revueErreur, setRevueErreur] = useState('')
+
+  const chargerRevueMeta = async () => {
+    if (!currentUser?.is_admin || currentView !== 'admin_cra' || !selectedReviewUser) return
+    try {
+      setRevueMeta(await getTimesheet(period, selectedReviewUser.id))
+    } catch (err) {
+      setRevueMeta(null)
+    }
+  }
+
+  useEffect(() => { chargerRevueMeta() }, [period, selectedReviewUser?.id, currentView])
+
+  const rouvrirLeMois = async () => {
+    if (!window.confirm(`Rouvrir ${format(currentDate, 'MMMM yyyy', { locale: fr })} pour ${selectedReviewUser.full_name} ?`)) return
+    setRevueBusy(true)
+    setRevueErreur('')
+    try {
+      await reopenPeriod(period, selectedReviewUser.id)
+    } catch (err) {
+      setRevueErreur(messageErreur(err, "Le mois n'a pas pu etre rouvert"))
+    } finally {
+      await chargerRevueMeta()
+      setRevueBusy(false)
     }
   }
 
@@ -910,6 +942,24 @@ function App() {
         <div className="bg-card rounded-[40px] p-10 border-2 border-line-strong animate-in slide-in-from-bottom-5 duration-500 shadow-2xl">
           <div className="flex justify-between items-center mb-10">
             <h3 className="text-3xl font-black uppercase tracking-tighter">Fiche de {selectedReviewUser.full_name}</h3>
+            {revueMeta && (
+              <div className="flex items-center gap-3">
+                <span className={`text-[10px] font-black uppercase tracking-widest ${revueMeta.closed ? 'text-primary' : 'text-ink-muted'}`}>
+                  {revueMeta.closed ? 'Mois clôturé' : 'Mois ouvert'}
+                </span>
+                {revueMeta.closed && (
+                  <button
+                    type="button"
+                    onClick={rouvrirLeMois}
+                    disabled={revueBusy}
+                    className="bg-card border-2 border-line rounded-full px-6 py-3 font-black uppercase text-[10px] tracking-widest hover:border-primary transition-all disabled:opacity-40"
+                  >
+                    Rouvrir le mois
+                  </button>
+                )}
+                {revueErreur && <span className="text-xs text-danger">{revueErreur}</span>}
+              </div>
+            )}
             <div className="flex items-center bg-primary-soft rounded-2xl p-1 border border-primary-soft shadow-sm transition-all hover:bg-primary-soft">
               <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="hover:bg-primary-soft p-2 rounded-xl transition-all text-primary"><ChevronLeft size={16} /></button>
               <span className="px-6 font-black text-xs uppercase tracking-widest text-primary min-w-[150px] text-center">{format(currentDate, 'MMMM yyyy', { locale: fr })}</span>
