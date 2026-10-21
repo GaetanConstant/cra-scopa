@@ -975,9 +975,13 @@ function App() {
               { label: 'Absences', type: 'Absence', color: 'bg-danger', icon: AlertCircle },
               { label: 'Fériés', type: 'Férié', color: 'bg-success', icon: Calendar },
             ].map(stat => {
+              // Les congés approuvés ne sont pas des saisies : ils viennent de leave_load.
+              const conges = stat.type === 'Absence'
+                ? Object.values(revueMeta?.leave_load ?? {}).reduce((s, v) => s + v, 0)
+                : 0;
               const total = selectedReviewUser.entries
                 .filter(e => e.activity_type === stat.type)
-                .reduce((sum, e) => sum + e.duration_factor, 0);
+                .reduce((sum, e) => sum + e.duration_factor, conges);
               return (
                 <div key={stat.type} className="bg-input rounded-3xl p-6 border-2 border-transparent hover:border-line transition-all">
                   <div className="flex items-center gap-4 mb-2">
@@ -1023,6 +1027,19 @@ function App() {
                     </tr>
                   )
                 })}
+                {Object.keys(revueMeta?.leave_load ?? {}).length > 0 && (
+                  <tr className="border-b border-line">
+                    <td className="p-4">Congés</td>
+                    {daysInMonth.map(day => {
+                      const valeur = revueMeta.leave_load[format(day, 'yyyy-MM-dd')] || 0;
+                      return (
+                        <td key={format(day, 'd')} className={`p-2 text-center text-[8px] ${getDay(day) === 0 || getDay(day) === 6 ? 'opacity-20' : ''}`}>
+                          {valeur > 0 ? <span className="bg-danger text-on-primary px-1.5 py-0.5 rounded-sm" title="Absence approuvée">{valeur}</span> : '-'}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

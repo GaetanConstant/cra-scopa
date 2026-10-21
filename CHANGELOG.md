@@ -6,6 +6,10 @@ de connexion. Les entrées décrivent le changement pour l'utilisateur.
 
 Format d'une entrée : `## vX.Y.Z — <date ISO> — <titre>`.
 
+## v2.3.1 — 2026-10-21 — Congés dans la fiche consultant
+### Corrigé
+- Dans « Revues CRA », la fiche d'un consultant affiche ses congés approuvés : une ligne « Congés » dans le calendrier, et la tuile « Absences » les compte.
+
 ## v2.3.0 — 2026-10-21 — Rouvrir un mois depuis l'app
 ### Ajouté
 - Dans « Revues CRA », la fiche d'un consultant indique si le mois est clôturé, et l'administrateur peut le rouvrir d'un clic.
