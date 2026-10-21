@@ -12,12 +12,13 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from holidays import holidays_for_year
-from main import LeaveType, engine
+from main import LeaveType, MonthClosure, engine
 from seed_holidays import seed as seed_holidays
 from seed_leave_types import seed as seed_leave_types
 from timesheet import (
     TimesheetError,
     check_quantities,
+    leave_conflicts,
     missing_working_days,
     overloaded_days,
     period_bounds,
@@ -64,6 +65,14 @@ def test_conge_compte_dans_la_charge_signalee() -> None:
     jour = date(2026, 6, 1)
     assert overloaded_days([(jour, 1.0)], {jour: 0.5}) == {jour: 1.5}
     assert overloaded_days([(jour, 0.5)], {jour: 0.5}) == {}
+
+
+def test_saisie_sur_un_jour_d_absence_est_un_conflit() -> None:
+    jour = date(2026, 6, 1)
+    assert leave_conflicts([(jour, 1.0)], {jour: 1.0}) == {jour: 2.0}
+    assert leave_conflicts([(jour, 0.5)], {jour: 0.5}) == {}
+    # Le cumul de missions sans absence n'est pas un conflit.
+    assert leave_conflicts([(jour, 1.0), (jour, 1.0)], {}) == {}
 
 
 def test_jours_ouvres_manquants() -> None:
@@ -591,3 +600,114 @@ def test_demande_de_conge_refusee_sur_periode_cloturee(
     )
     assert reponse.status_code == 409
     assert "cloturee" in reponse.json()["detail"]
+
+
+# --- Clôture et congés -----------------------------------------------------
+
+
+def _remplir_sauf(
+    client: TestClient,
+    entetes: dict[str, str],
+    user_id: int,
+    project_id: int,
+    exclus: set[str],
+) -> None:
+    debut, fin = period_bounds("2026-06")
+    lignes = []
+    jour = debut
+    while jour <= fin:
+        if jour.weekday() < 5 and jour not in FERIES_2026 and str(jour) not in exclus:
+            lignes.append(_ligne(str(jour), user_id, 1.0, project_id))
+        jour = date.fromordinal(jour.toordinal() + 1)
+    assert _enregistrer(client, entetes, lignes).status_code == 200
+
+
+def test_cloture_refusee_si_un_conge_du_mois_est_en_attente(
+    client: TestClient, entetes_admin: dict[str, str], cp_id: int, admin_id: int
+) -> None:
+    projet = _projet(client, entetes_admin)
+    _remplir_sauf(client, entetes_admin, admin_id, projet["id"], {"2026-06-15"})
+    client.post(
+        "/leaves",
+        json={"leave_type_id": cp_id, "start_date": "2026-06-15", "end_date": "2026-06-15"},
+        headers=entetes_admin,
+    )
+    # Le jour en attente reste un trou : on le comble pour isoler la règle.
+    _remplir_le_mois(client, entetes_admin, admin_id, projet["id"])
+
+    reponse = client.post("/time/close", json={"period": "2026-06"}, headers=entetes_admin)
+    assert reponse.status_code == 409
+    assert reponse.json()["detail"]["pending_leaves"][0]["start_date"] == "2026-06-15"
+
+
+def test_cloture_refusee_si_un_jour_de_conge_porte_une_saisie(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    cp_id: int,
+    consultant_id: int,
+) -> None:
+    """Le cas d'Orkun : CP validé le 9, mais une journée saisie le même jour."""
+    projet = _projet(client, entetes_admin)
+    _affecter(client, entetes_admin, consultant_id, projet["id"])
+    _poser_conge_approuve(
+        client, entetes_admin, entetes_consultant, cp_id, "2026-06-15", "2026-06-15"
+    )
+    _remplir_le_mois(client, entetes_consultant, consultant_id, projet["id"])
+
+    reponse = client.post(
+        "/time/close", json={"period": "2026-06"}, headers=entetes_consultant
+    )
+    assert reponse.status_code == 409
+    assert reponse.json()["detail"]["conflict_days"] == {"2026-06-15": 2.0}
+
+    vue = client.get("/time?period=2026-06", headers=entetes_consultant).json()
+    assert vue["conflict_days"] == {"2026-06-15": 2.0}
+
+    # Une fois la saisie retirée du jour posé, la clôture passe.
+    _remplir_sauf(
+        client, entetes_consultant, consultant_id, projet["id"], {"2026-06-15"}
+    )
+    assert (
+        client.post(
+            "/time/close", json={"period": "2026-06"}, headers=entetes_consultant
+        ).status_code
+        == 200
+    )
+
+
+def test_validation_de_conge_refusee_sur_periode_cloturee(
+    client: TestClient,
+    entetes_admin: dict[str, str],
+    entetes_consultant: dict[str, str],
+    cp_id: int,
+    consultant_id: int,
+) -> None:
+    projet = _projet(client, entetes_admin)
+    _affecter(client, entetes_admin, consultant_id, projet["id"])
+    demande = client.post(
+        "/leaves",
+        json={"leave_type_id": cp_id, "start_date": "2026-06-15", "end_date": "2026-06-15"},
+        headers=entetes_consultant,
+    ).json()
+    _remplir_le_mois(client, entetes_consultant, consultant_id, projet["id"])
+    # Clôture forcée en base : l'API la refuserait, le congé étant en attente.
+    with Session(engine) as session:
+        session.add(MonthClosure(user_id=consultant_id, period="2026-06", status="closed"))
+        session.commit()
+
+    reponse = client.post(
+        f"/leaves/{demande['id']}/decide", json={"approve": True}, headers=entetes_admin
+    )
+    assert reponse.status_code == 409
+    assert "cloturee" in reponse.json()["detail"]
+
+    # Refuser reste possible : cela ne touche pas au décompte.
+    assert (
+        client.post(
+            f"/leaves/{demande['id']}/decide",
+            json={"approve": False},
+            headers=entetes_admin,
+        ).status_code
+        == 200
+    )

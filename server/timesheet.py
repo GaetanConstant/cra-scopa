@@ -82,6 +82,24 @@ def overloaded_days(
     return dict(sorted(charges.items()))
 
 
+def leave_conflicts(
+    entries: Sequence[tuple[date, float]],
+    leave_load: Mapping[date, float],
+) -> dict[date, float]:
+    """Journées où une saisie s'ajoute à une absence au-delà d'une journée.
+
+    Contrairement au cumul de missions, ce n'est pas légitime : on ne
+    travaille pas un jour posé. Ces journées bloquent la clôture.
+    """
+    totaux = daily_totals(entries)
+    conflits = {}
+    for jour, absence in leave_load.items():
+        total = round(totaux.get(jour, 0.0) + absence, 2)
+        if totaux.get(jour) and total > FULL_DAY:
+            conflits[jour] = total
+    return dict(sorted(conflits.items()))
+
+
 def missing_working_days(
     period: str,
     entries: Sequence[tuple[date, float]],
